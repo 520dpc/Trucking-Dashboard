@@ -1,13 +1,35 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-generator client {
-  provider = "prisma-client"
-  output   = "../app/generated/prisma"
+generator client {                                        // Tells Prisma to generate a client for our app.
+  provider = "prisma-client-js"                          // Uses the standard JS/TS Prisma client for Node/Next.js.
 }
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+datasource db {                                          // Configures the database connection for Prisma.
+  provider = "postgresql"                                // We are using Neon Postgres as our database.
+  url      = env("DATABASE_URL")                         // Reads the connection string from the .env file.
 }
 
+model User {                                             // Represents an application user / account in FleetCore.
+  id           String   @id @default(uuid())             // Primary key as a UUID string, auto-generated.
+  email        String   @unique                          // Unique email address; used for login/identity.
+  passwordHash String                                   // Hashed password (for future real auth, not plain text).
+  createdAt    DateTime @default(now())                  // Timestamp for when the user was created.
+  updatedAt    DateTime @updatedAt                       // Auto-updated timestamp when the user record changes.
+
+  loads        Load[]                                    // One-to-many relation: a user can have many loads.
+}
+
+model Load {                                             // Represents a single freight load (revenue event).
+  id          String   @id @default(uuid())              // Primary key as a UUID string, auto-generated.
+  userId      String                                     // Foreign key pointing to the owning user.
+  user        User     @relation(fields: [userId], references: [id]) // Relation to User; required for multi-user support.
+
+  broker      String?                                    // Optional broker name for the load.
+  rate        Int                                        // Total revenue for the load (e.g., dollars or cents).
+  miles       Int                                        // Total loaded miles driven for this load.
+  fuelCost    Int                                        // Fuel cost for this load.
+  lumper      Int?                                       // Optional lumper fees for this load.
+  tolls       Int?                                       // Optional toll costs.
+  otherCosts  Int?                                       // Optional other direct costs.
+
+  createdAt   DateTime @default(now())                   // When the load record was created.
+  updatedAt   DateTime @updatedAt                        // Auto-updated when any load field changes.
+}
