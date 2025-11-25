@@ -1,35 +1,83 @@
-generator client {                                        // Tells Prisma to generate a client for our app.
-  provider = "prisma-client-js"                          // Uses the standard JS/TS Prisma client for Node/Next.js.
+generator client {
+  provider = "prisma-client-js"
 }
 
-datasource db {                                          // Configures the database connection for Prisma.
-  provider = "postgresql"                                // We are using Neon Postgres as our database.
-  url      = env("DATABASE_URL")                         // Reads the connection string from the .env file.
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-model User {                                             // Represents an application user / account in FleetCore.
-  id           String   @id @default(uuid())             // Primary key as a UUID string, auto-generated.
-  email        String   @unique                          // Unique email address; used for login/identity.
-  passwordHash String                                   // Hashed password (for future real auth, not plain text).
-  createdAt    DateTime @default(now())                  // Timestamp for when the user was created.
-  updatedAt    DateTime @updatedAt                       // Auto-updated timestamp when the user record changes.
+///////////////////////////
+// USER
+///////////////////////////
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  loads        Load[]                                    // One-to-many relation: a user can have many loads.
+  loads        Load[]
+  customers    Customer[]
+  callNotes    CallNote[]
 }
 
-model Load {                                             // Represents a single freight load (revenue event).
-  id          String   @id @default(uuid())              // Primary key as a UUID string, auto-generated.
-  userId      String                                     // Foreign key pointing to the owning user.
-  user        User     @relation(fields: [userId], references: [id]) // Relation to User; required for multi-user support.
+///////////////////////////
+// CUSTOMER
+///////////////////////////
+model Customer {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
 
-  broker      String?                                    // Optional broker name for the load.
-  rate        Int                                        // Total revenue for the load (e.g., dollars or cents).
-  miles       Int                                        // Total loaded miles driven for this load.
-  fuelCost    Int                                        // Fuel cost for this load.
-  lumper      Int?                                       // Optional lumper fees for this load.
-  tolls       Int?                                       // Optional toll costs.
-  otherCosts  Int?                                       // Optional other direct costs.
+  name      String
+  type      String?
+  mcNumber  String?
+  email     String?
+  phone     String?
+  notes     String?
 
-  createdAt   DateTime @default(now())                   // When the load record was created.
-  updatedAt   DateTime @updatedAt                        // Auto-updated when any load field changes.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  loads     Load[]
+  callNotes CallNote[]
+}
+
+///////////////////////////
+// LOAD
+///////////////////////////
+model Load {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id])
+
+  broker      String?
+  rate        Int
+  miles       Int
+  fuelCost    Int
+  lumper      Int?
+  tolls       Int?
+  otherCosts  Int?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+///////////////////////////
+// CALL NOTE (mini CRM)
+///////////////////////////
+model CallNote {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+
+  content     String
+  createdAt   DateTime @default(now())
 }
