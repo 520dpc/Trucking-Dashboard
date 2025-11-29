@@ -20,7 +20,9 @@ model User {
   loads        Load[]
   customers    Customer[]
   callNotes    CallNote[]
+  expenses     Expense[]     // NEW: all expenses owned by this user
 }
+
 
 ///////////////////////////
 // CUSTOMER
@@ -80,4 +82,22 @@ model CallNote {
 
   content     String
   createdAt   DateTime @default(now())
+}
+
+///////////////////////////
+// EXPENSE
+///////////////////////////
+model Expense {
+  id          String   @id @default(uuid())        // Unique expense ID.
+
+  userId      String                              // FK → User who owns this expense.
+  user        User     @relation(fields: [userId], references: [id])
+
+  category    String                              // e.g. "FUEL", "MAINTENANCE", "INSURANCE".
+  amount      Int                                 // Amount (we'll treat as dollars for now).
+  description String?                             // Optional description / note.
+  incurredAt  DateTime @default(now())            // When the expense was incurred.
+
+  createdAt   DateTime @default(now())            // When the record was created.
+  updatedAt   DateTime @updatedAt                 // Auto-updated on change.
 }

@@ -4,7 +4,7 @@ import { db } from "@/lib/db";                                  // Imports the P
 // GET /api/customers/:id → fetch a single customer by ID (including call notes).
 export async function GET(
   req: NextRequest,                                             // Incoming HTTP request (not used here, but part of the handler signature).
-  { params }: { params: Promise<{ id?: string }> }              // Next.js passes `params` as a Promise; we must await it to get the id.
+  { params }: { params: Promise<{ id?: string }> }              // In your environment, Next.js is passing `params` as a Promise, so we type it that way.
 ) {
   try {                                                         // Wrap logic in try/catch to handle errors gracefully.
     const { id } = await params;                                // Awaits the params Promise and destructures the `id` value.
