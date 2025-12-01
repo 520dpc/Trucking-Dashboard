@@ -1,61 +1,93 @@
-import { NextRequest, NextResponse } from "next/server";        // Imports Next.js helpers for handling HTTP requests and generating JSON responses.
-import { db } from "@/lib/db";                                  // Imports the Prisma client instance so we can query and mutate the database.
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
 
-// GET /api/expenses → list all expenses (for now, for the demo user).
-export async function GET() {                                   // Defines the GET handler for the /api/expenses endpoint.
-  try {                                                         // Wrap the logic in a try/catch to handle runtime errors gracefully.
-    const expenses = await db.expense.findMany({                // Uses Prisma to fetch all expense records.
-      orderBy: { incurredAt: "desc" },                          // Sorts expenses by date incurred, newest first.
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const range = searchParams.get("range") || "30"; // default: last 30 days
+
+    let fromDate: Date | null = null;
+
+    if (range !== "all") {
+      const days = parseInt(range, 10);
+      if (!Number.isNaN(days)) {
+        fromDate = new Date();
+        fromDate.setDate(fromDate.getDate() - days);
+      }
+    }
+
+    const where: any = {};
+
+    if (fromDate) {
+      where.incurredAt = { gte: fromDate };
+    }
+
+    const expenses = await db.expense.findMany({
+      where,
+      orderBy: { incurredAt: "desc" },
     });
 
-    return NextResponse.json(expenses);                         // Returns the list of expenses as a JSON response.
+    return NextResponse.json(expenses);
   } catch (err) {
-
-    console.error("[EXPENSES_GET_ERROR]", err);                 // Logs the error to the server console for debugging.
-    return NextResponse.json(                                  // Sends a structured error response back to the client.
-      { error: `${db.expense}` },                    // Error message payload.
-      { status: 500 }                                           // HTTP 500 = internal server error.
+    console.error("[EXPENSES_GET_ERROR]", err);
+    return NextResponse.json(
+      { error: "Failed to fetch expenses" },
+      { status: 500 }
     );
   }
 }
 
-// POST /api/expenses → create a new expense.
-export async function POST(req: NextRequest) {                  // Defines the POST handler for the /api/expenses endpoint.
+export async function POST(req: NextRequest) {
   try {
-    const data = await req.json();                              // Parses the JSON body from the incoming request.
+    const data = await req.json();
 
-    // TEMP: ensure the demo user exists until we add real authentication.
-    let user = await db.user.findFirst({                        // Looks up the demo user in the database.
-      where: { email: "demo@demo.com" },                        // Filters by the hard-coded demo email.
+    const isRecurring = Boolean(data.isRecurring);
+    const recurrenceFreq: string | null = data.recurrenceFreq ?? null;
+
+    // App-level validation: if it's recurring, frequency is required.
+    if (isRecurring && !recurrenceFreq) {
+      return NextResponse.json(
+        { error: "recurrenceFreq is required when isRecurring is true" },
+        { status: 400 }
+      );
+    }
+
+    // TEMP: demo user
+    let user = await db.user.findFirst({
+      where: { email: "demo@demo.com" },
     });
 
-    if (!user) {                                                // If the demo user does not exist yet...
-      user = await db.user.create({                             // Create the demo user so expenses can reference a valid userId.
+    if (!user) {
+      user = await db.user.create({
         data: {
-          email: "demo@demo.com",                               // Demo user's email.
-          passwordHash: "placeholder",                          // Placeholder password hash until real auth is implemented.
+          email: "demo@demo.com",
+          passwordHash: "placeholder",
         },
       });
     }
 
-    const expense = await db.expense.create({                   // Creates a new expense record using Prisma.
+    const expense = await db.expense.create({
       data: {
-        userId: user.id,                                        // Associates the expense with the demo user's ID.
-        category: data.category,                                // Category string from the request body (e.g., "FUEL").
-        amount: Number(data.amount),                            // Converts amount to a number to match the Int field.
-        description: data.description ?? null,                  // Optional description or null if not provided.
-        incurredAt: data.incurredAt                             // Optional custom date if provided...
-          ? new Date(data.incurredAt)                           // ...convert it to a Date object.
-          : new Date(),                                         // Otherwise, default to now.
+        userId: user.id,
+        categoryGroup: data.categoryGroup,
+        categoryKey: data.categoryKey,
+        label: data.label ?? null,
+        amount: Number(data.amount),
+        description: data.description ?? null,
+        incurredAt: data.incurredAt
+          ? new Date(data.incurredAt)
+          : new Date(),
+        isRecurring,
+        recurrenceFreq, // can be null, but never null when isRecurring === true
       },
     });
 
-    return NextResponse.json(expense, { status: 201 });         // Returns the created expense with HTTP 201 Created status.
-  } catch (err) {
-    console.error("[EXPENSES_POST_ERROR]", err);                // Logs any error that occurs during creation.
-    return NextResponse.json(                                  // Sends an error response back to the client.
-      { error: "Failed to create expense" },                    // Error payload for the client.
-      { status: 500 }                                           // HTTP 500 = internal server error.
+    return NextResponse.json(expense, { status: 201 });
+  } catch (err: any) {
+    console.error("[EXPENSES_POST_ERROR]", err);
+    return NextResponse.json(
+      { error: err?.message || "Failed to create expense" },
+      { status: 500 }
     );
   }
 }

@@ -88,16 +88,25 @@ model CallNote {
 // EXPENSE
 ///////////////////////////
 model Expense {
-  id          String   @id @default(uuid())        // Unique expense ID.
+  id             String   @id @default(uuid())
 
-  userId      String                              // FK → User who owns this expense.
-  user        User     @relation(fields: [userId], references: [id])
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
 
-  category    String                              // e.g. "FUEL", "MAINTENANCE", "INSURANCE".
-  amount      Int                                 // Amount (we'll treat as dollars for now).
-  description String?                             // Optional description / note.
-  incurredAt  DateTime @default(now())            // When the expense was incurred.
+  categoryGroup  String?
+  categoryKey    String?
+  label          String?
 
-  createdAt   DateTime @default(now())            // When the record was created.
-  updatedAt   DateTime @updatedAt                 // Auto-updated on change.
+  amount         Int
+  description    String?
+  incurredAt     DateTime @default(now())
+  isRecurring    Boolean  @default(false)
+  recurrenceFreq String?                       // "WEEKLY" | "BIWEEKLY" | "MONTHLY" | "ANNUAL"
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
+
+
+
+
