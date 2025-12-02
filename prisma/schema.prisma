@@ -11,17 +11,21 @@ datasource db {
 // USER
 ///////////////////////////
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               String                  @id @default(uuid()) // Primary key for the user.
+  email            String                  @unique              // Unique email address for login/identification.
+  passwordHash     String                                      // Hashed password for auth (placeholder until real auth flow).
 
-  loads        Load[]
-  customers    Customer[]
-  callNotes    CallNote[]
-  expenses     Expense[]     // NEW: all expenses owned by this user
+  loads            Load[]                                     // All loads owned by this user.
+  expenses         Expense[]                                  // All expenses owned by this user.
+  customers        Customer[]                                // All customers (brokers/shippers) for this user.
+  callNotes        CallNote[]                                // All call notes created by this user.
+  dashboardLayouts DashboardWidgetLayout[]                   // All saved dashboard widget layouts for this user.
+
+  createdAt        DateTime               @default(now())     // When the user row was created.
+  updatedAt        DateTime               @updatedAt          // Auto-updated timestamp when the user row changes.
 }
+
+
 
 
 ///////////////////////////
@@ -105,6 +109,25 @@ model Expense {
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+model DashboardWidgetLayout {                                      // Stores per-user layout info for each dashboard widget.
+  id        String   @id @default(uuid())                          // Unique row ID for this layout entry.
+
+  userId    String                                                  // FK → User who owns this layout.
+  user      User     @relation(fields: [userId], references: [id])  // Relation to the User model.
+
+  widgetId  String                                                  // ID of the widget (e.g., "revenueKpi"); matches DashboardWidgetId in TS.
+
+  x         Int                                                     // X coordinate in the grid (column index).
+  y         Int                                                     // Y coordinate in the grid (row index).
+  w         Int                                                     // Width of the widget in grid units (columns spanned).
+  h         Int                                                     // Height of the widget in grid units (rows spanned).
+
+  createdAt DateTime @default(now())                               // Timestamp when this layout entry was created.
+  updatedAt DateTime @updatedAt                                    // Timestamp automatically updated on each change.
+
+  @@unique([userId, widgetId])                                     // Ensures each user has at most one layout row per widget.
 }
 
 
