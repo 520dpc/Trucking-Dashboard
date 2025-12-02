@@ -83,10 +83,10 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(expense, { status: 201 });
-  } catch (err: any) {
+  } catch (err) {
     console.error("[EXPENSES_POST_ERROR]", err);
     return NextResponse.json(
-      { error: err?.message || "Failed to create expense" },
+      { error: "Failed to create expense" },
       { status: 500 }
     );
   }
