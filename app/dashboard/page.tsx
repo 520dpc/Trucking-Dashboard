@@ -4,7 +4,9 @@ import {
   DEFAULT_DASHBOARD_LAYOUT,
   type DashboardWidgetId,
   type WidgetLayoutConfig,
-} from "@/lib/dashboardWidgets";                                      // Imports widget layout config and types used to drive the dashboard grid.
+} from "@/lib/dashboardWidgets";  
+import DashboardGridClient from "./DashboardGridClient";          // Client-side grid wrapper that enables drag-and-drop for widgets.
+                                    // Imports widget layout config and types used to drive the dashboard grid.
 
 // Props for the KPI cards at the top of the dashboard.                         //
 type KpiCardProps = {
@@ -537,17 +539,19 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Widget grid driven by layout (DB or default). */}
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-12">
-        {layout.map((item) => (
-          <div
-            key={item.id}
-            className={`col-span-1 ${colSpanClassForWidth(item.w)}`}
-          >
-            {renderWidget(item.id)}
-          </div>
-        ))}
+      {/* Widget grid driven by layout (DB or default), now draggable via react-grid-layout. */}
+      <section>
+        <DashboardGridClient initialLayout={layout}>
+          {/* We render one child per widget ID, in the same order as layout. */}
+          {layout.map((item) => (
+            <div key={item.id}>
+              {/* Each child wrapper gets a stable key that matches the widget ID. */}
+              {renderWidget(item.id)}                             {/* Uses our existing renderWidget helper to render the correct card. */}
+            </div>
+          ))}
+        </DashboardGridClient>
       </section>
+
     </div>
   );
 }

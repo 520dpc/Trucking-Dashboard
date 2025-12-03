@@ -24,3 +24,37 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ===================== */
+/* Dashboard grid tweaks */
+/* ===================== */
+
+/* Keep the react-grid-layout resize handle just inside the card corner. */
+/* This selector targets the handle that RGL attaches to each grid item. */
+.react-grid-item > .react-resizable-handle {
+  right: 6px !important;    /* pull a bit left from the very edge */
+  bottom: 6px !important;   /* pull a bit up from the very bottom */
+}
+
+/* Slightly smaller, cleaner handle triangle. */
+.react-resizable-handle {
+  width: 12px !important;
+  height: 12px !important;
+  opacity: 0.7;
+}
+
+/* Optional: make grid items feel a bit nicer when dragging */
+.react-grid-item {
+  transition: box-shadow 0.15s ease;
+}
+
+.react-grid-item.react-grid-item.resizing,
+.react-grid-item.react-grid-item.react-draggable-dragging {
+  box-shadow: 0 8px 24px rgba(15, 37, 68, 0.12);
+}
+
+/* Ensure the placeholder (while dragging) is invisible so it doesn't draw weird shapes. */
+.react-grid-placeholder {
+  background: transparent !important;
+  border-radius: 0 !important;
+}
