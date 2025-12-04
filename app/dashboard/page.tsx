@@ -1,557 +1,258 @@
-import Link from "next/link";                                         // Imports Next.js Link for in-app navigation without full reloads.
-import { db } from "@/lib/db";                                        // Imports Prisma client to run database queries on the server.
-import {
-  DEFAULT_DASHBOARD_LAYOUT,
-  type DashboardWidgetId,
-  type WidgetLayoutConfig,
-} from "@/lib/dashboardWidgets";  
-import DashboardGridClient from "./DashboardGridClient";          // Client-side grid wrapper that enables drag-and-drop for widgets.
-                                    // Imports widget layout config and types used to drive the dashboard grid.
+import { db } from "@/lib/db"; // Imports the Prisma client so this server component can query the database.
+import DashboardGridClient from "./DashboardGridClient"; // Imports the client-side grid component that handles drag + resize.
+import { RevenueWidget } from "./components/RevenueWidget"; // Imports the Revenue KPI widget.
+import { ExpensesWidget } from "./components/ExpensesWidget"; // Imports the Expenses KPI widget.
+import { ProfitWidget } from "./components/ProfitWidget"; // Imports the Net Profit KPI widget.
+import { RpmWidget } from "./components/RpmWidget"; // Imports the Rate Per Mile KPI widget.
+import { FuelPercentWidget } from "./components/FuelPercentWidget"; // Imports the Fuel % of Revenue KPI widget.
+import { LoadsCompletedWidget } from "./components/LoadsCompletedWidget"; // Imports the Loads Completed KPI widget.
+import { RecentLoadsWidget } from "./components/RecentLoadsWidget"; // Imports the Loads (Last 7 Days) KPI widget.
+import { UtilizationWidget } from "./components/UtilizationWidget"; // Imports the Fleet Utilization KPI widget.
+import { MilesWidget } from "./components/MilesWidget"; // Imports the Total Miles KPI widget.
+import { CashflowWidget } from "./components/CashflowWidget"; // Imports the Net Cashflow KPI widget.
+import { StaleCustomersWidget } from "./components/StaleCustomersWidget"; // Imports the Stale Customers widget.
+import { StaleProspectsWidget } from "./components/StaleProspectsWidget"; // Imports the Stale Prospects widget.
+import type { WidgetLayoutConfig } from "@/lib/dashboardWidgets"; // Imports the shared layout type used by DashboardGridClient.
 
-// Props for the KPI cards at the top of the dashboard.                         //
-type KpiCardProps = {
-  label: string;                                                      // Label text for the KPI card (e.g., "Revenue").
-  value: string;                                                      // Primary value string (e.g., "$24,000").
-  sublabel?: string;                                                  // Optional secondary text under the value.
-  href?: string;                                                      // Optional link; if provided the card becomes clickable.
-};
+export const dynamic = "force-dynamic"; // Tells Next.js not to cache this page so KPI data is always fresh per request.
 
-// Simple KPI card component reused for revenue, expenses, etc.                 //
-function KpiCard({ label, value, sublabel, href }: KpiCardProps) {
-  const content = (                                                   // Prebuilds the inner content so we can optionally wrap in a Link.
-    <div className="flex flex-col gap-1 rounded-xl border bg-white px-4 py-3 shadow-sm">
-      {/* Card container with padding, border, and subtle shadow. */}
-      <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-        {/* Small, uppercase label at the top of the card. */}
-        {label}
-      </span>
-      <span className="text-2xl font-semibold text-slate-900">
-        {/* Main KPI value in a larger font. */}
-        {value}
-      </span>
-      {sublabel && (
-        <span className="text-xs text-slate-500">
-          {/* Optional sublabel shown only if provided. */}
-          {sublabel}
-        </span>
-      )}
-    </div>
-  );
-
-  if (href) {
-    // If href is provided, make the whole card clickable as a link.
-    return (
-      <Link href={href} className="block">
-        {content}
-      </Link>
-    );
-  }
-
-  return content;                                                     // If no href, just render the plain card.
+// Helper to safely sum arrays of numbers, ignoring null/undefined.
+function sum(values: (number | null | undefined)[]): number { // Declares a sum helper that accepts an array of possibly-null numbers.
+  return values.reduce((acc, v) => acc + (v ?? 0), 0); // Reduces the array, treating null/undefined as 0.
 }
 
-// Props for a simple inline sparkline chart.                                     //
-type SparklineProps = {
-  values: number[];                                                   // Array of numeric values to visualize over time.
-};
-
-// Small SVG sparkline to show trends without pulling in another chart library.   //
-function Sparkline({ values }: SparklineProps) {
-  if (!values || values.length < 2) {
-    // If we have fewer than 2 points, skip rendering the chart.
-    return null;
-  }
-
-  const max = Math.max(...values);                                    // Finds the maximum value to normalize the Y-axis.
-  const min = Math.min(...values);                                    // Finds the minimum value for normalization.
-  const range = max - min || 1;                                       // Avoids divide-by-zero by defaulting range to 1.
-
-  const points = values
-    .map((v, index) => {
-      const x = (index / (values.length - 1)) * 100;                  // Maps the index into a 0–100 range for the X coordinate.
-      const y = 100 - ((v - min) / range) * 100;                      // Maps value into 0–100 Y space, flipped so higher values are visually higher.
-      return `${x},${y}`;                                             // Returns a "x,y" string for the SVG polyline.
-    })
-    .join(" ");                                                       // Joins all points into the full polyline points string.
-
-  return (
-    <svg viewBox="0 0 100 100" className="mt-3 h-10 w-full">
-      {/* SVG canvas with a fixed viewBox; Tailwind controls rendered size. */}
-      <polyline
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2}
-        points={points}
-        className="text-sky-500"
-      />
-      {/* Polyline renders the sparkline; color inherited via text-sky-500. */}
-    </svg>
-  );
+// Helper to compute percent change vs a previous value.
+function percentChange(current: number, previous: number): number | null { // Declares a helper for percentage change.
+  if (previous <= 0) return null; // If previous is zero or negative, returns null to avoid divide-by-zero junk.
+  return ((current - previous) / previous) * 100; // Computes ((current - previous) / previous) * 100.
 }
 
-// Shape used for "customers to follow up" rows.                                   //
-type FollowUpCustomer = {
-  id: string;                                                          // Customer ID used for linking to the detail page.
-  name: string;                                                        // Customer name.
-  phone: string | null;                                                // Optional phone number.
-  lastContactAt: Date | null;                                          // Timestamp of the most recent call note.
-};
-
-// Shape of the EIA fuel API result we care about.                                   //
-type FuelInfo = {
-  price: number | null;                                                // National diesel price in USD per gallon, or null if unavailable.
-  asOf: string | null;                                                 // Date string from EIA (e.g., "2025-02-24"), or null if unknown.
-};
-
-// Helper to fetch national diesel price from EIA on the server.                     //
-// Uses EIA_API_KEY from environment; returns nulls gracefully if anything fails.    //
-async function fetchNationalDieselPrice(): Promise<FuelInfo> {
-  const apiKey = process.env.EIA_API_KEY;                              // Reads EIA API key from server-side environment variables.
-
-  if (!apiKey) {
-    // If there is no API key configured, return null gracefully.
-    return { price: null, asOf: null };
-  }
-
-  try {
-    const url =
-      "https://api.eia.gov/series/?" +
-      new URLSearchParams({
-        api_key: apiKey,                                              // Injects the API key into the request query.
-        series_id: "PET.EMD_EPD2D_PTE_NUS_DPG.W",                     // EIA series ID for weekly U.S. on-highway diesel fuel price.
-      }).toString();
-
-    const res = await fetch(url, {
-      // Uses server-side fetch to call the EIA API.
-      next: { revalidate: 60 * 60 * 24 },                             // Asks Next.js to cache the response for 24 hours.
-    });
-
-    if (!res.ok) {
-      // If the HTTP status is not 2xx, treat as failure.
-      console.error("[EIA_FUEL_FETCH_ERROR]", res.statusText);        // Logs an error for debugging.
-      return { price: null, asOf: null };
-    }
-
-    const json = (await res.json()) as any;                           // Parses the JSON response; typed as any due to EIA schema.
-    const series = json?.series?.[0];                                 // Grabs the first series from the result set.
-    const firstPoint = series?.data?.[0];                             // Grabs the most recent data point [date, value].
-
-    if (!firstPoint || !Array.isArray(firstPoint)) {
-      // If data shape is unexpected, bail out gracefully.
-      return { price: null, asOf: null };
-    }
-
-    const [date, value] = firstPoint;                                 // Destructures [dateString, priceNumber].
-    const numeric = typeof value === "number" ? value : Number(value); // Coerces value into a number if possible.
-
-    if (!Number.isFinite(numeric)) {
-      // If price cannot be parsed as a finite number, fall back to null.
-      return { price: null, asOf: String(date ?? "") || null };
-    }
-
-    return {
-      price: numeric,                                                 // Returns the numeric national diesel price.
-      asOf: typeof date === "string" ? date : String(date ?? ""),     // Returns the raw date label from EIA.
-    };
-  } catch (err) {
-    console.error("[EIA_FUEL_FETCH_EXCEPTION]", err);                 // Logs network or parsing errors.
-    return { price: null, asOf: null };                               // Returns nulls so the UI can show a safe placeholder.
-  }
+// Helper to approximate utilization based on miles vs a theoretical maximum.
+function approxUtilization(totalMiles: number, days: number): number { // Declares a helper for rough utilization.
+  const maxMilesPerDay = 600; // Assumes ~600 miles/day per truck as a sanity upper bound.
+  const theoreticalMax = maxMilesPerDay * days; // Computes maximum possible miles over the period.
+  if (theoreticalMax <= 0) return 0; // If no days or invalid window, returns 0% utilization.
+  const ratio = (totalMiles / theoreticalMax) * 100; // Computes actual miles as a percentage of theoretical max.
+  return Math.max(0, Math.min(100, ratio)); // Clamps the result between 0 and 100.
 }
 
-// Main dashboard home page for /dashboard.                                           //
-export default async function DashboardPage() {
-  // TEMP AUTH: use demo user until we plug in real authentication.                  //
-  let user = await db.user.findFirst({
-    where: { email: "demo@demo.com" },                               // Looks for a user row with the demo email address.
-  });
+export default async function DashboardPage() { // Default export: async React Server Component for the dashboard route.
+  const now = new Date(); // Captures the current time for all period calculations.
+  const daysInPeriod = 30; // Defines the primary KPI period as the last 30 days.
 
-  if (!user) {
-    // If demo user does not exist yet, create it so all demo data has an owner.
-    user = await db.user.create({
-      data: {
-        email: "demo@demo.com",                                      // Demo user email.
-        passwordHash: "placeholder",                                 // Placeholder hash until a real auth system is added.
-      },
-    });
-  }
+  const periodStart = new Date(now); // Creates a Date object we can mutate for the current period start.
+  periodStart.setDate(periodStart.getDate() - daysInPeriod); // Moves periodStart back 30 days.
 
-  // Fetch core metrics and external fuel info in parallel to minimize wait time.    //
-  const [loads, expenses, customers, fuelInfo, layoutRows] = await Promise.all([
-    db.load.findMany({
-      where: { userId: user.id },                                    // Loads owned by this user (multi-tenant friendly).
+  const prevPeriodStart = new Date(periodStart); // Clones periodStart to compute the previous period start.
+  prevPeriodStart.setDate(prevPeriodStart.getDate() - daysInPeriod); // Moves previous period start back another 30 days.
+
+  const last7Start = new Date(now); // Creates a Date object for the last 7-day window start.
+  last7Start.setDate(last7Start.getDate() - 7); // Moves last7Start back 7 days.
+
+  const prev7Start = new Date(last7Start); // Clones last7Start to compute the prior 7-day window start.
+  prev7Start.setDate(prev7Start.getDate() - 7); // Moves prev7Start back another 7 days.
+
+  const staleThresholdDays = 30; // Defines how many days of silence counts as "stale" for customers.
+  const staleCutoff = new Date(now); // Creates a Date object to represent the cutoff for stale contacts.
+  staleCutoff.setDate(staleCutoff.getDate() - staleThresholdDays); // Moves staleCutoff back by the threshold days.
+
+  const [ // Uses Promise.all to fetch all required data from Prisma in parallel for performance.
+    loadsCurrent, // Holds loads from the current 30-day period.
+    loadsPrev, // Holds loads from the previous 30-day period.
+    loadsLast7, // Holds loads from the last 7 days.
+    loadsPrev7, // Holds loads from the 7 days before that.
+    expensesCurrent, // Holds expenses in the current 30-day period.
+    expensesPrev, // Holds expenses in the previous 30-day period.
+    customersWithNotes, // Holds customers plus their most recent call note.
+  ] = await Promise.all([
+    db.load.findMany({ // Queries loads created in the current 30-day window.
+      where: { createdAt: { gte: periodStart, lte: now } }, // Filters loads whose createdAt is between periodStart and now.
     }),
-    db.expense.findMany({
-      where: { userId: user.id },                                    // Expenses owned by this user.
+    db.load.findMany({ // Queries loads created in the previous 30-day window.
+      where: { createdAt: { gte: prevPeriodStart, lt: periodStart } }, // Filters loads between prevPeriodStart and periodStart.
     }),
-    db.customer.findMany({
-      where: { userId: user.id },                                    // Customers owned by this user.
+    db.load.findMany({ // Queries loads created in the last 7 days.
+      where: { createdAt: { gte: last7Start, lte: now } }, // Filters loads between last7Start and now.
+    }),
+    db.load.findMany({ // Queries loads created in the prior 7-day window.
+      where: { createdAt: { gte: prev7Start, lt: last7Start } }, // Filters loads between prev7Start and last7Start.
+    }),
+    db.expense.findMany({ // Queries expenses incurred in the current 30-day period.
+      where: { incurredAt: { gte: periodStart, lte: now } }, // Filters expenses whose incurredAt is within the current window.
+    }),
+    db.expense.findMany({ // Queries expenses incurred in the previous 30-day period.
+      where: { incurredAt: { gte: prevPeriodStart, lt: periodStart } }, // Filters expenses in the prior window.
+    }),
+    db.customer.findMany({ // Queries all customers along with their most recent call note for stale detection.
       include: {
-        callNotes: {                                                 // Also load latest call note per customer for follow-up logic.
-          orderBy: { createdAt: "desc" },
-          take: 1,
-        },
+        callNotes: { orderBy: { createdAt: "desc" }, take: 1 }, // Includes the latest call note (if any) for each customer.
       },
-    }),
-    fetchNationalDieselPrice(),                                      // Fetch national diesel price from EIA (or null on failure).
-    db.dashboardWidgetLayout.findMany({
-      where: { userId: user.id },                                    // Any saved custom layouts for this user.
-      orderBy: [{ y: "asc" }, { x: "asc" }],                         // Sort by row then column for stability.
     }),
   ]);
 
-  // hydrate layout from DB if present, otherwise fallback to defaults.              //
-  const layout: WidgetLayoutConfig[] =
-    layoutRows.length === 0
-      ? DEFAULT_DASHBOARD_LAYOUT                                      // If user has not customized layout, use our default grid positions.
-      : layoutRows.map((row) => ({
-          id: row.widgetId as DashboardWidgetId,                      // Convert DB widgetId string to our typed DashboardWidgetId.
-          x: row.x,                                                   // Persisted X column.
-          y: row.y,                                                   // Persisted Y row.
-          w: row.w,                                                   // Persisted width.
-          h: row.h,                                                   // Persisted height.
-        }));
+  const totalRevenueCurrent = sum(loadsCurrent.map((l) => l.rate)); // Sums rate across current-period loads to get total revenue.
+  const totalRevenuePrev = sum(loadsPrev.map((l) => l.rate)); // Sums rate across previous-period loads for revenue comparison.
 
-  // === KPI + metrics calculations ===                                            //
+  const totalMilesCurrent = sum(loadsCurrent.map((l) => l.miles)); // Sums miles across current-period loads.
+  const totalMilesPrev = sum(loadsPrev.map((l) => l.miles)); // Sums miles across previous-period loads.
 
-  const totalRevenue = loads.reduce((sum, load) => sum + load.rate, 0); // Sum of load rates for total revenue.
-  const totalExpenses = expenses.reduce(
-    (sum, exp) => sum + exp.amount,
-    0,
-  );                                                                    // Sum of all expense amounts.
-  const netProfit = totalRevenue - totalExpenses;                       // Net profit = revenue - expenses.
-  const activeCustomers = customers.length;                             // Count of active customers.
+  const totalFuelCurrent = sum( // Sums direct load-level costs for current period.
+    loadsCurrent.map((l) => (l.fuelCost ?? 0) + (l.lumper ?? 0) + (l.tolls ?? 0) + (l.otherCosts ?? 0)) // Adds fuel, lumper, tolls, and otherCosts per load.
+  );
+  const totalFuelPrev = sum( // Sums direct load-level costs for previous period.
+    loadsPrev.map((l) => (l.fuelCost ?? 0) + (l.lumper ?? 0) + (l.tolls ?? 0) + (l.otherCosts ?? 0)) // Same cost aggregation for previous-period loads.
+  );
 
-  const now = new Date();                                               // Current timestamp for relative window calculations.
-  const thirtyDaysAgo = new Date(
-    now.getTime() - 30 * 24 * 60 * 60 * 1000,
-  );                                                                    // Timestamp 30 days prior.
+  const totalExpensesCurrent = sum(expensesCurrent.map((e) => e.amount)); // Sums general expenses in the current period.
+  const totalExpensesPrev = sum(expensesPrev.map((e) => e.amount)); // Sums general expenses in the previous period.
 
-  const recentLoads = loads.filter((load) => load.createdAt >= thirtyDaysAgo); // Loads created in the last 30 days.
-  const loadsLast30 = recentLoads.length;                               // Number of loads completed in the last 30 days.
+  const netProfitCurrent = totalRevenueCurrent - totalFuelCurrent - totalExpensesCurrent; // Calculates net profit for the current period.
+  const netProfitPrev = totalRevenuePrev - totalFuelPrev - totalExpensesPrev; // Calculates net profit for the previous period.
 
-  const totalMiles = loads.reduce((sum, load) => sum + load.miles, 0);  // Sum of miles across all loads.
-  const avgRpm =
-    totalMiles > 0 ? totalRevenue / totalMiles : null;                  // Average rate per mile if miles > 0, else null.
+  const rpmCurrent =
+    totalMilesCurrent > 0 ? totalRevenueCurrent / totalMilesCurrent : 0; // Computes current RPM safely, avoiding divide-by-zero.
+  const rpmPrev =
+    totalMilesPrev > 0 ? totalRevenuePrev / totalMilesPrev : null; // Computes previous RPM or null if no miles.
+  const rpmDelta = rpmPrev != null ? rpmCurrent - rpmPrev : null; // Computes change in RPM vs prior period, or null if no baseline.
 
-  // Revenue sparkline data: last 10 loads by createdAt, ordered oldest to newest.   //
-  const revenueSparkValues = loads
-    .slice()
-    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())      // Sort loads ascending by creation time.
-    .slice(-10)                                                         // Take the last 10 loads (or fewer if not enough).
-    .map((load) => load.rate);                                          // Map to rate values for the sparkline.
+  const fuelPercentCurrent =
+    totalRevenueCurrent > 0 ? (totalFuelCurrent / totalRevenueCurrent) * 100 : 0; // Computes fuel % of revenue for the current period.
+  const fuelPercentPrev =
+    totalRevenuePrev > 0 ? (totalFuelPrev / totalRevenuePrev) * 100 : null; // Computes fuel % of revenue for the previous period or null.
+  const fuelPercentDelta =
+    fuelPercentPrev != null ? fuelPercentCurrent - fuelPercentPrev : null; // Computes change in fuel % vs prior period in points.
 
-  // Customers needing follow-up: no contact or last contact older than 30 days.     //
-  const followUpCutoff = thirtyDaysAgo;                                 // Use same 30-day cutoff for CRM follow-up.
+  const loadsThisPeriod = loadsCurrent.length; // Counts loads in the current 30-day period.
+  const loadsPriorPeriod = loadsPrev.length; // Counts loads in the previous 30-day period.
+  const loadsLast7Days = loadsLast7.length; // Counts loads in the last 7 days.
+  const loadsPrev7Days = loadsPrev7.length; // Counts loads in the prior 7 days.
 
-  const followUpCandidates: FollowUpCustomer[] = customers
-    .map((c) => {
-      const lastNote = c.callNotes[0] ?? null;                          // Most recent call note if any.
-      return {
-        id: c.id,                                                       // Customer ID.
-        name: c.name,                                                   // Customer name.
-        phone: c.phone ?? null,                                         // Contact phone or null.
-        lastContactAt: lastNote ? lastNote.createdAt : null,            // Last contact timestamp or null.
-      } satisfies FollowUpCustomer;
-    })
-    .filter((c) => {
-      if (!c.lastContactAt) return true;                                // If never contacted, always needs follow-up.
-      return c.lastContactAt < followUpCutoff;                          // If last contact is older than cutoff, needs follow-up.
-    })
-    .sort((a, b) => {
-      const aTime = a.lastContactAt ? a.lastContactAt.getTime() : 0;    // Converts last contact to ms (null = oldest).
-      const bTime = b.lastContactAt ? b.lastContactAt.getTime() : 0;
-      return aTime - bTime;                                             // Sort oldest first.
-    })
-    .slice(0, 5);                                                       // Show top 5 follow-up customers.
+  const avgMilesPerDay =
+    daysInPeriod > 0 ? totalMilesCurrent / daysInPeriod : null; // Computes average miles per day over the 30-day period.
 
-  // Helper to format currency consistently in USD.                                  //
-  const formatCurrency = (value: number) =>
-    value.toLocaleString("en-US", {
-      style: "currency",                                                // Format as currency.
-      currency: "USD",                                                  // Use US dollars.
-      maximumFractionDigits: 0,                                         // Whole dollars for KPIs.
-    });
+  const utilizationPercent = approxUtilization(totalMilesCurrent, daysInPeriod); // Computes a rough utilization based on miles vs theoretical max.
 
-  // Helper to format a Date as a short human-readable string.                      //
-  const formatDate = (value: Date | null) => {
-    if (!value) return "-";                                             // Nulls render as a dash.
-    return value.toLocaleDateString();                                  // Example: "12/2/2025" depending on locale.
-  };
+  const revenueDeltaPercent = percentChange(totalRevenueCurrent, totalRevenuePrev); // Computes revenue percent change vs prior period.
+  const expensesDeltaPercent = percentChange(totalExpensesCurrent + totalFuelCurrent, totalExpensesPrev + totalFuelPrev); // Computes total expense (fuel + general) change.
+  const profitDeltaPercent = percentChange(netProfitCurrent, netProfitPrev); // Computes net profit percent change vs prior period.
 
-  // Helper to map widget width (w) to Tailwind grid column span classes.           //
-  const colSpanClassForWidth = (w: number): string => {
-    switch (w) {
-      case 3:
-        return "xl:col-span-3";                                         // Quarter width on xl screens.
-      case 4:
-        return "xl:col-span-4";                                         // Third width (unused currently but available).
-      case 6:
-        return "xl:col-span-6";                                         // Half-width on xl screens.
-      case 12:
-        return "xl:col-span-12";                                        // Full-width row.
-      default:
-        return "xl:col-span-4";                                         // Sensible fallback.
-    }
-  };
+  const cashflowCurrent = netProfitCurrent; // Simplifies net cashflow as net profit for now (can refine later).
+  const cashflowPrev = netProfitPrev; // Uses previous net profit as the prior cashflow proxy.
+  const cashflowDeltaPercent = percentChange(cashflowCurrent, cashflowPrev); // Computes cashflow percent change vs prior period.
 
-  // Render function for each widget by its ID, using precomputed metrics.          //
-  const renderWidget = (id: DashboardWidgetId) => {
-    switch (id) {
-      case "revenueKpi":
-        return (
-          <KpiCard
-            label="Revenue"
-            value={formatCurrency(totalRevenue)}
-            sublabel="All time"
-            href="/dashboard/reports"
-          />
-        );
-      case "expensesKpi":
-        return (
-          <KpiCard
-            label="Expenses"
-            value={formatCurrency(totalExpenses)}
-            sublabel="All time"
-            href="/dashboard/expenses"
-          />
-        );
-      case "netProfitKpi":
-        return (
-          <KpiCard
-            label="Net profit"
-            value={formatCurrency(netProfit)}
-            sublabel="Revenue minus expenses"
-            href="/dashboard/reports"
-          />
-        );
-      case "activeCustomersKpi":
-        return (
-          <KpiCard
-            label="Active customers"
-            value={activeCustomers.toString()}
-            sublabel="Customers with records in your account"
-            href="/dashboard/customers"
-          />
-        );
-      case "loadsCompletedCard":
-        return (
-          <div className="rounded-xl border bg-white p-4 shadow-sm">
-            {/* Loads completed summary card with a sparkline of revenue for recent loads. */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">
-                  Loads completed
-                </h2>
-                <p className="text-xs text-slate-500">In the last 30 days</p>
-              </div>
-              <Link
-                href="/dashboard/loads"
-                className="text-xs text-sky-600 hover:underline"
-              >
-                View loads
-              </Link>
-            </div>
-            <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-3xl font-semibold text-slate-900">
-                {loadsLast30}
-              </span>
-              <span className="text-xs text-slate-500">
-                loads in last 30 days
-              </span>
-            </div>
-            <p className="mt-2 text-xs text-slate-500">
-              Recent revenue trend (last {revenueSparkValues.length} loads)
-            </p>
-            <Sparkline values={revenueSparkValues} />
-          </div>
-        );
-      case "avgRpmCard":
-        return (
-          <div className="rounded-xl border bg-white p-4 shadow-sm">
-            {/* Average rate-per-mile summary. */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">
-                  Average rate per mile
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Across all recorded loads
-                </p>
-              </div>
-              <Link
-                href="/dashboard/reports"
-                className="text-xs text-sky-600 hover:underline"
-              >
-                View reports
-              </Link>
-            </div>
-            <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-3xl font-semibold text-slate-900">
-                {avgRpm !== null ? `$${avgRpm.toFixed(2)}` : "-"}
-              </span>
-              <span className="text-xs text-slate-500">per mile</span>
-            </div>
-          </div>
-        );
-      case "staleCustomersCard":
-        return (
-          <div className="rounded-xl border bg-white p-4 shadow-sm">
-            {/* Customers needing follow-up based on recent call notes. */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">
-                  Customers to follow up
-                </h2>
-                <p className="text-xs text-slate-500">
-                  No recent call notes in the last 30 days
-                </p>
-              </div>
-              <Link
-                href="/dashboard/customers"
-                className="text-xs text-sky-600 hover:underline"
-              >
-                View all customers
-              </Link>
-            </div>
-            {followUpCandidates.length === 0 ? (
-              <p className="mt-4 text-xs text-slate-500">
-                You&apos;re up to date on customer outreach.
-              </p>
-            ) : (
-              <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full text-xs">
-                  <thead>
-                    <tr className="border-b bg-slate-50">
-                      <th className="px-2 py-1 text-left font-medium text-slate-600">
-                        Customer
-                      </th>
-                      <th className="px-2 py-1 text-left font-medium text-slate-600">
-                        Phone
-                      </th>
-                      <th className="px-2 py-1 text-left font-medium text-slate-600">
-                        Last contact
-                      </th>
-                      <th className="px-2 py-1 text-left font-medium text-slate-600">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {followUpCandidates.map((c) => (
-                      <tr key={c.id} className="border-b last:border-b-0">
-                        <td className="px-2 py-1">
-                          <Link
-                            href={`/dashboard/customers/${c.id}`}
-                            className="text-sky-600 hover:underline"
-                          >
-                            {c.name}
-                          </Link>
-                        </td>
-                        <td className="px-2 py-1">{c.phone ?? "-"}</td>
-                        <td className="px-2 py-1">
-                          {formatDate(c.lastContactAt)}
-                        </td>
-                        <td className="px-2 py-1">
-                          <Link
-                            href={`/dashboard/customers/${c.id}`}
-                            className="text-sky-600 hover:underline"
-                          >
-                            View notes
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        );
-      case "staleProspectsCard":
-        return (
-          <div className="rounded-xl border bg-white p-4 shadow-sm">
-            {/* Placeholder for future prospects CRM follow-up list. */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">
-                  Prospects to follow up
-                </h2>
-                <p className="text-xs text-slate-500">
-                  This will show prospects without recent outreach.
-                </p>
-              </div>
-            </div>
-            <p className="mt-4 text-xs text-slate-500">
-              Prospect tracking is planned as a next-phase CRM feature.
-            </p>
-          </div>
-        );
-      case "fuelOverviewCard":
-        return (
-          <div className="rounded-xl border bg-white p-4 shadow-sm">
-            {/* Fuel overview card powered by EIA national diesel price. */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">
-                  Fuel overview
-                </h2>
-                <p className="text-xs text-slate-500">
-                  U.S. on-highway diesel price (EIA)
-                </p>
-              </div>
-              <span className="text-[10px] uppercase text-slate-400">
-                EIA.gov
-              </span>
-            </div>
-            <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-2xl font-semibold text-slate-900">
-                {fuelInfo.price !== null
-                  ? `$${fuelInfo.price.toFixed(2)}`
-                  : "N/A"}
-              </span>
-              <span className="text-xs text-slate-500">per gallon</span>
-            </div>
-            <p className="mt-2 text-xs text-slate-500">
-              {fuelInfo.asOf
-                ? `Last updated: ${fuelInfo.asOf}`
-                : "Configure EIA_API_KEY to enable live fuel data."}
-            </p>
-          </div>
-        );
-      default:
-        return null;                                                  // Unknown widget IDs are rendered as nothing (safety fallback).
-    }
-  };
+  const staleCustomers = customersWithNotes.filter((customer) => { // Filters customers that are considered "stale".
+    const lastNote = customer.callNotes[0]; // Gets the most recent call note if it exists.
+    const lastContact = lastNote?.createdAt ?? customer.createdAt; // Uses last note date, or customer creation date as fallback.
+    return lastContact < staleCutoff; // Marks customer as stale if last contact is older than the cutoff.
+  });
+  const staleCustomersCount = staleCustomers.length; // Counts how many customers are currently stale.
 
-  return (
-    <div className="space-y-6">
-      {/* Page header */}
-      <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
+  const staleProspectsCount = 0; // Placeholder: Prospects CRM not wired yet, so we report 0 (widget will explain this is coming soon).
+
+  const periodLabel = "Last 30 days"; // Defines a single label describing the main KPI period for the dashboard.
+
+  const initialLayout: WidgetLayoutConfig[] = [ // Defines the initial grid layout for each widget tile.
+    { id: "revenueKpi", x: 0, y: 0, w: 3, h: 2 }, // Places Revenue KPI in the top-left, 3 columns wide, 2 rows tall.
+    { id: "expensesKpi", x: 3, y: 0, w: 3, h: 2 }, // Places Expenses KPI next to Revenue.
+    { id: "netProfitKpi", x: 6, y: 0, w: 3, h: 2 }, // Places Net Profit KPI in the first row.
+    { id: "cashflowKpi", x: 9, y: 0, w: 3, h: 2 }, // Places Cashflow KPI in the first row, right side.
+    { id: "avgRpmCard", x: 0, y: 2, w: 3, h: 2 }, // Places RPM KPI in the second row, left.
+    { id: "fuelOverviewCard", x: 3, y: 2, w: 3, h: 2 }, // Places Fuel % of Revenue KPI in the second row.
+    { id: "loadsCompletedCard", x: 6, y: 2, w: 3, h: 2 }, // Places Loads Completed KPI in the second row.
+    { id: "milesCard", x: 9, y: 2, w: 3, h: 2 }, // Places Total Miles KPI in the second row, right.
+    { id: "staleCustomersCard", x: 0, y: 4, w: 4, h: 3 }, // Places Stale Customers widget in the third row, spanning 4 columns.
+    { id: "staleProspectsCard", x: 4, y: 4, w: 4, h: 3 }, // Places Stale Prospects widget in the middle of the third row.
+    { id: "recentLoadsCard", x: 8, y: 4, w: 4, h: 3 }, // Places Recent Loads (Last 7 Days) widget on the right side.
+    { id: "utilizationCard", x: 0, y: 7, w: 4, h: 2 }, // Places Fleet Utilization KPI in the fourth row.
+  ];
+
+  return ( // Returns the full JSX tree for the dashboard page.
+    <div className="space-y-6 p-4"> {/* Outer wrapper with padding and vertical spacing between sections. */}
+      <header className="flex items-center justify-between"> {/* Header row with title on the left and period label on the right. */}
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">
+            Dashboard {/* Main heading for the FleetCore dashboard view. */}
+          </h1>
           <p className="text-sm text-slate-500">
-            Snapshot of your fleet&apos;s revenue, costs, and customers.
+            High-level view of your revenue, costs, and customer health. {/* Short description of what this page shows. */}
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <span>Demo view for demo@demo.com</span>
+        <div className="text-xs text-slate-500">
+          {periodLabel} {/* Displays the current KPI period label ("Last 30 days"). */}
         </div>
-      </div>
+      </header>
 
-      {/* Widget grid driven by layout (DB or default), now draggable via react-grid-layout. */}
-      <section>
-        <DashboardGridClient initialLayout={layout}>
-          {/* We render one child per widget ID, in the same order as layout. */}
-          {layout.map((item) => (
-            <div key={item.id}>
-              {/* Each child wrapper gets a stable key that matches the widget ID. */}
-              {renderWidget(item.id)}                             {/* Uses our existing renderWidget helper to render the correct card. */}
-            </div>
-          ))}
-        </DashboardGridClient>
-      </section>
-
+      <DashboardGridClient initialLayout={initialLayout}> {/* Renders the grid of widgets using the configured layout. */}
+        <RevenueWidget
+          totalRevenue={totalRevenueCurrent} // Passes current-period total revenue into the Revenue widget.
+          periodLabel={periodLabel} // Passes the shared period label.
+          deltaPercent={revenueDeltaPercent ?? undefined} // Passes revenue percent change or undefined if null.
+          className="bg-slate-900 text-slate-50 border-slate-800" // Example styling: dark card for revenue.
+        />
+        <ExpensesWidget
+          totalExpenses={totalExpensesCurrent + totalFuelCurrent} // Combines expenses + fuel as total operating expenses.
+          periodLabel={periodLabel} // Passes the period label.
+          deltaPercent={expensesDeltaPercent ?? undefined} // Passes expense percent change vs prior period.
+          className="bg-slate-900 text-slate-50 border-slate-800" // Matches styling with revenue card.
+        />
+        <ProfitWidget
+          netProfit={netProfitCurrent} // Passes net profit for the current period.
+          periodLabel={periodLabel} // Passes the period label.
+          deltaPercent={profitDeltaPercent ?? undefined} // Passes profit percent change vs prior period.
+          className="bg-emerald-900/90 text-emerald-50 border-emerald-500" // Highlights profit card in green to stand out.
+        />
+        <CashflowWidget
+          netCashflow={cashflowCurrent} // Passes net cashflow (simplified as net profit).
+          periodLabel={periodLabel} // Passes period label.
+          deltaPercent={cashflowDeltaPercent ?? undefined} // Passes cashflow percent change vs prior period.
+          className="bg-slate-900 text-slate-50 border-slate-800" // Keeps styling consistent with other financial KPIs.
+        />
+        <RpmWidget
+          rpm={rpmCurrent} // Passes current-period RPM.
+          periodLabel={periodLabel} // Passes period label.
+          deltaRpm={rpmDelta ?? undefined} // Passes RPM delta or undefined.
+          className="bg-slate-900 text-slate-50 border-slate-800" // Styles RPM card in the same dark theme.
+        />
+        <FuelPercentWidget
+          fuelPercentOfRevenue={fuelPercentCurrent} // Passes fuel % of revenue for the current period.
+          periodLabel={periodLabel} // Period label.
+          deltaPercent={fuelPercentDelta ?? undefined} // Passes change in fuel % vs prior period.
+          className="bg-slate-900 text-slate-50 border-slate-800" // Styles the fuel KPI card.
+        />
+        <LoadsCompletedWidget
+          loadsThisPeriod={loadsThisPeriod} // Passes load count for the current period.
+          loadsPriorPeriod={loadsPriorPeriod} // Passes load count for prior period for trend.
+          periodLabel={periodLabel} // Period label.
+          className="bg-slate-900 text-slate-50 border-slate-800" // Styles the loads KPI card.
+        />
+        <MilesWidget
+          totalMiles={totalMilesCurrent} // Passes total miles driven in the period.
+          periodLabel={periodLabel} // Period label.
+          avgMilesPerDay={avgMilesPerDay ?? undefined} // Passes average miles per day if available.
+          className="bg-slate-900 text-slate-50 border-slate-800" // Styles the miles KPI card.
+        />
+        <StaleCustomersWidget
+          staleCustomersCount={staleCustomersCount} // Passes count of customers that have gone stale.
+          thresholdDays={staleThresholdDays} // Passes the day threshold for staleness.
+          className="bg-amber-900/90 text-amber-50 border-amber-500" // Highlights this widget in amber as a warning.
+        />
+        <StaleProspectsWidget
+          staleProspectsCount={staleProspectsCount} // Passes count of stale prospects (placeholder for now).
+          thresholdDays={staleThresholdDays} // Passes threshold for future real logic.
+          className="bg-amber-900/90 text-amber-50 border-amber-500" // Styles similarly to stale customers widget.
+        />
+        <RecentLoadsWidget
+          loadsLast7Days={loadsLast7Days} // Passes loads completed in the last 7 days.
+          loadsPrev7Days={loadsPrev7Days} // Passes loads completed in the prior 7 days for comparison.
+          className="bg-slate-900 text-slate-50 border-slate-800" // Styles recent loads widget in dark theme.
+        />
+        <UtilizationWidget
+          utilizationPercent={utilizationPercent} // Passes the approximate utilization percentage.
+          periodLabel={periodLabel} // Period label.
+          deltaPercent={null} // We are not yet computing utilization vs prior period, so pass null.
+          className="bg-slate-900 text-slate-50 border-slate-800" // Styles the utilization widget.
+        />
+      </DashboardGridClient>
     </div>
   );
 }
