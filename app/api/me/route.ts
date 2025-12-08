@@ -1,30 +1,52 @@
-import { NextRequest, NextResponse } from "next/server"; // Imports Next.js types/helpers so we can handle requests and return JSON responses.
-import { db } from "@/lib/db";                            // Imports the shared Prisma client instance to talk to the database.
+import { NextRequest, NextResponse } from "next/server";              // Imports Next.js request/response types and helpers for building API routes.
+import { getDemoTenant } from "@/lib/demoTenant";                      // Imports the helper that returns (or creates) the demo Company + User pair.
 
-// GET /api/me → return the current user (for now, the hard-coded demo user).
-export async function GET(req: NextRequest) {            // Defines the GET handler for the /api/me endpoint; Next.js will call this for GET requests.
-  try {                                                  // Wrap logic in try/catch so any error is handled gracefully instead of crashing the route.
-    const user = await db.user.findFirst({               // Queries the User table to find the demo user record.
-      where: { email: "demo@demo.com" },                 // Filters by the hard-coded demo email; later this will be replaced by real auth logic.
-    });                                                  // Ends the Prisma query configuration.
+/**
+ * GET /api/me
+ * Returns the "current" user and their company context.
+ * For now this is the demo tenant (demo company + demo user) until real auth is wired in.
+ */
+export async function GET(_req: NextRequest) {                         // Defines the GET handler for /api/me; Next.js calls this on GET requests.
+  try {                                                                // Wraps the logic in a try/catch so any error is handled gracefully.
+    const { company, user } = await getDemoTenant();                   // Uses the shared demoTenant helper to resolve a Company + User pair.
 
-    if (!user) {                                         // If no user with that email exists in the database...
-      return NextResponse.json(                          // Return a JSON response indicating that the current user could not be resolved.
-        { error: "Demo user not found" },                // Body explaining that there is no demo user yet.
-        { status: 404 }                                  // HTTP 404 = not found, because the "current user" concept failed.
-      );                                                 // End of 404 response.
+    if (!user || !company) {                                           // Extra guard: if for some reason either is missing...
+      return NextResponse.json(                                       // ...respond with a 500-level error indicating a server-side problem.
+        { error: "Failed to resolve demo tenant" },                    // JSON error message describing what went wrong.
+        { status: 500 }                                                // HTTP 500 = internal server error.
+      );
     }
 
-    return NextResponse.json({                           // If the demo user exists, return a JSON response with basic user info.
-      id: user.id,                                       // Exposes the user’s ID so the frontend can associate data with this user.
-      email: user.email,                                 // Exposes the email for display or debugging.
-      createdAt: user.createdAt,                         // Exposes when the user was created; useful for auditing later.
-    });                                                  // Ends the successful JSON response with default 200 status.
-  } catch (err) {                                        // If an error happens anywhere in the try block...
-    console.error("[ME_GET_ERROR]", err);                // Log the error to the server console with a clear tag for debugging.
-    return NextResponse.json(                            // Return a generic 500 error response to the client.
-      { error: "Failed to load current user" },          // Body explaining that we could not resolve the current user due to an internal error.
-      { status: 500 }                                    // HTTP 500 = internal server error.
-    );                                                   // End of 500 response.
+    return NextResponse.json({                                         // Builds a successful JSON response describing the current user + company.
+      user: {                                                          // Nests user-related fields under `user` for clarity.
+        id: user.id,                                                   // Exposes the user ID so the frontend can tag requests with it if needed.
+        email: user.email,                                             // Exposes the login/email address for display and debugging.
+        fullName: user.fullName,                                       // Exposes the optional full name for UI personalization.
+        role: user.role,                                               // Exposes the user's role (OWNER, DISPATCHER, etc.) for permission logic.
+        companyId: user.companyId,                                     // Links the user explicitly to their company in the response.
+        createdAt: user.createdAt,                                     // Shows when the user account was created (auditing / UX).
+        isActive: user.isActive,                                       // Indicates whether the user is currently active in the system.
+      },
+      company: {                                                       // Nests company-related fields under `company`.
+        id: company.id,                                                // Exposes the company ID for scoping queries on the frontend.
+        name: company.name,                                            // Company name for display in the UI header / settings.
+        dotNumber: company.dotNumber,                                  // DOT number if present; useful for forms and integrations.
+        mcNumber: company.mcNumber,                                    // MC number if present; also used in onboarding and compliance.
+        defaultDaysToPay: company.defaultDaysToPay,                    // Default payment terms; used in AR and risk widgets.
+        expandThreshold: company.expandThreshold,                      // "Ready to expand" threshold score (for your future expansion feature).
+        defaultCurrency: company.defaultCurrency,                      // Currency code (e.g., USD); future-proof for non-US users.
+        defaultFuelMpg: company.defaultFuelMpg,                        // Default fuel MPG for cost estimations.
+        defaultTruckFixedCostPerDay: company.defaultTruckFixedCostPerDay, // Default fixed cost per truck per day (for profitability modeling).
+        timezone: company.timezone,                                    // Timezone for date grouping (reports, dashboards).
+        createdAt: company.createdAt,                                  // When the company record was created.
+        updatedAt: company.updatedAt,                                  // When the company record was last updated.
+      },
+    });                                                                // Ends the JSON response with default 200 OK status.
+  } catch (err) {                                                      // If any error occurs inside the try block...
+    console.error("[ME_GET_ERROR]", err);                              // Log the error with a clear tag so it's easy to spot in server logs.
+    return NextResponse.json(                                         // Return a standardized error response to the client.
+      { error: "Failed to load current user" },                        // Generic error message to avoid leaking internal details.
+      { status: 500 }                                                  // HTTP 500 = internal server error.
+    );
   }
 }

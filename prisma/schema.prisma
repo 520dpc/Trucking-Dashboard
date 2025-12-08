@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js" // Generates Prisma Client for Node/TS usage.
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -7,9 +7,496 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-///////////////////////////
-// ENUMS
-///////////////////////////
+model Company {
+  id                          String                       @id @default(uuid())
+  name                        String
+  dotNumber                   String?
+  mcNumber                    String?
+  defaultDaysToPay            Int?
+  expandThreshold             Int?
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  defaultCurrency             String?
+  defaultFuelMpg              Float?
+  defaultTruckFixedCostPerDay Int?
+  timezone                    String?
+  callNotes                   CallNote[]
+  contacts                    Contact[]
+  customers                   Customer[]
+  dashboardLayouts            DashboardWidgetLayout[]
+  documents                   Document[]
+  drivers                     Driver[]
+  emailLogs                   EmailLog[]
+  emailTemplates              EmailTemplate[]
+  expansionSnapshots          ExpansionReadinessSnapshot[]
+  expenses                    Expense[]
+  invoices                    Invoice[]
+  loads                       Load[]
+  locations                   Location[]
+  metricSnapshots             MetricSnapshot[]
+  payments                    Payment[]
+  tasks                       Task[]
+  trailers                    Trailer[]
+  trucks                      Truck[]
+  users                       User[]
+}
+
+model User {
+  id               String                  @id @default(uuid())
+  email            String                  @unique
+  passwordHash     String
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  companyId        String
+  fullName         String?
+  isActive         Boolean                 @default(true)
+  role             UserRole                @default(DISPATCHER)
+  callNotes        CallNote[]
+  customers        Customer[]
+  dashboardLayouts DashboardWidgetLayout[]
+  documents        Document[]
+  expenses         Expense[]
+  loads            Load[]                  @relation("UserLoads")
+  tasksAssigned    Task[]                  @relation("UserTasks")
+  company          Company                 @relation(fields: [companyId], references: [id])
+}
+
+model Customer {
+  id           String         @id @default(uuid())
+  userId       String
+  name         String
+  type         String?
+  mcNumber     String?
+  email        String?
+  phone        String?
+  notes        String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  companyId    String
+  companyNotes String?
+  convertedAt  DateTime?
+  country      String?        @default("US")
+  daysToPay    Int?
+  deletedAt    DateTime?
+  dormantAt    DateTime?
+  leadStatus   LeadStatus?
+  postalCode   String?
+  state        String?
+  status       CustomerStatus @default(PROSPECT)
+  billingEmail String?
+  creditHold   Boolean        @default(false)
+  creditLimit  Int?
+  portalUrl    String?
+  callNotes    CallNote[]
+  contacts     Contact[]
+  company      Company        @relation(fields: [companyId], references: [id])
+  user         User           @relation(fields: [userId], references: [id])
+  documents    Document[]     @relation("CustomerDocuments")
+  emailLogs    EmailLog[]
+  invoices     Invoice[]
+  loads        Load[]
+  payments     Payment[]
+  tasks        Task[]         @relation("CustomerTasks")
+}
+
+model CallNote {
+  id         String   @id @default(uuid())
+  userId     String
+  customerId String
+  content    String
+  createdAt  DateTime @default(now())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id])
+  customer   Customer @relation(fields: [customerId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model Load {
+  id                String        @id @default(uuid())
+  userId            String
+  broker            String?
+  rate              Int
+  miles             Int
+  fuelCost          Int
+  lumper            Int?
+  tolls             Int?
+  otherCosts        Int?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  customerId        String?
+  commodity         String?
+  companyId         String
+  deletedAt         DateTime?
+  deliveryDate      DateTime?
+  equipment         EquipmentType @default(DRY_VAN)
+  invoicedAt        DateTime?
+  isPaid            Boolean       @default(false)
+  isSoftDeleted     Boolean       @default(false)
+  isTeam            Boolean       @default(false)
+  loadValue         Int?
+  paidAt            DateTime?
+  pickupDate        DateTime?
+  status            LoadStatus    @default(DRAFT)
+  temperature       Float?
+  trailerId         String?
+  truckId           String?
+  detentionHours    Int?
+  externalReference String?
+  layoverDays       Int?
+  loadNumber        String?
+  tonuReason        String?
+  documents         Document[]    @relation("LoadDocuments")
+  expenses          Expense[]
+  invoiceLinks      InvoiceLoad[]
+  company           Company       @relation(fields: [companyId], references: [id])
+  customer          Customer?     @relation(fields: [customerId], references: [id])
+  trailer           Trailer?      @relation(fields: [trailerId], references: [id])
+  truck             Truck?        @relation(fields: [truckId], references: [id])
+  user              User          @relation("UserLoads", fields: [userId], references: [id])
+  loadDrivers       LoadDriver[]
+  stops             LoadStop[]
+  tasks             Task[]        @relation("LoadTasks")
+}
+
+model LoadStop {
+  id           String    @id @default(uuid())
+  loadId       String
+  sequence     Int
+  type         StopType
+  locationId   String?
+  name         String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  postalCode   String?
+  country      String?   @default("US")
+  scheduledAt  DateTime?
+  arrivedAt    DateTime?
+  departedAt   DateTime?
+  bolNumber    String?
+  pickupNumber String?
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  load         Load      @relation(fields: [loadId], references: [id])
+  location     Location? @relation(fields: [locationId], references: [id])
+}
+
+model LoadDriver {
+  id       String  @id @default(uuid())
+  loadId   String
+  driverId String
+  role     String?
+  driver   Driver  @relation(fields: [driverId], references: [id])
+  load     Load    @relation(fields: [loadId], references: [id])
+}
+
+model Driver {
+  id              String       @id @default(uuid())
+  companyId       String
+  firstName       String
+  lastName        String
+  driverCode      String?      @unique
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  hireDate        DateTime?
+  licenseNumber   String?
+  licenseState    String?
+  terminationDate DateTime?
+  documents       Document[]   @relation("DriverDocuments")
+  company         Company      @relation(fields: [companyId], references: [id])
+  loadAssignments LoadDriver[]
+}
+
+model Truck {
+  id             String      @id @default(uuid())
+  companyId      String
+  unitNumber     String
+  vin            String?     @unique
+  year           Int?
+  make           String?
+  model          String?
+  type           String?
+  status         TruckStatus @default(ACTIVE)
+  condition      String?
+  inactiveReason String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  lastPmAt       DateTime?
+  monthlyPayment Int?
+  odometer       Int?
+  purchasePrice  Int?
+  documents      Document[]  @relation("TruckDocuments")
+  expenses       Expense[]
+  loads          Load[]
+  trailers       Trailer[]
+  company        Company     @relation(fields: [companyId], references: [id])
+}
+
+model Trailer {
+  id              String        @id @default(uuid())
+  companyId       String
+  trailerNumber   String
+  year            Int?
+  type            TrailerType   @default(DRY_VAN)
+  lengthFeet      Int?
+  status          TrailerStatus @default(ACTIVE)
+  condition       String?
+  inactiveReason  String?
+  isReefer        Boolean       @default(false)
+  hasAirChute     Boolean       @default(false)
+  airChuteType    String?
+  assignedTruckId String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  documents       Document[]    @relation("TrailerDocuments")
+  expenses        Expense[]
+  loads           Load[]
+  assignedTruck   Truck?        @relation(fields: [assignedTruckId], references: [id])
+  company         Company       @relation(fields: [companyId], references: [id])
+}
+
+model Location {
+  id            String     @id @default(uuid())
+  companyId     String
+  name          String
+  isShipper     Boolean    @default(true)
+  isReceiver    Boolean    @default(true)
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  state         String?
+  postalCode    String?
+  country       String?    @default("US")
+  shippingHours String?
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  contacts      Contact[]
+  stops         LoadStop[]
+  company       Company    @relation(fields: [companyId], references: [id])
+}
+
+model Contact {
+  id         String    @id @default(uuid())
+  companyId  String
+  customerId String?
+  locationId String?
+  name       String
+  role       String?
+  email      String?
+  phone      String?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  company    Company   @relation(fields: [companyId], references: [id])
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  location   Location? @relation(fields: [locationId], references: [id])
+}
+
+model Expense {
+  id             String   @id @default(uuid())
+  userId         String
+  amount         Int
+  description    String?
+  incurredAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  categoryGroup  String?
+  categoryKey    String?
+  isRecurring    Boolean  @default(false)
+  label          String?
+  recurrenceFreq String?
+  companyId      String
+  loadId         String?
+  trailerId      String?
+  truckId        String?
+  company        Company  @relation(fields: [companyId], references: [id])
+  load           Load?    @relation(fields: [loadId], references: [id])
+  trailer        Trailer? @relation(fields: [trailerId], references: [id])
+  truck          Truck?   @relation(fields: [truckId], references: [id])
+  user           User     @relation(fields: [userId], references: [id])
+}
+
+model Invoice {
+  id                    String        @id @default(uuid())
+  companyId             String
+  customerId            String
+  invoiceNumber         String
+  externalInvoiceNumber String?
+  issueDate             DateTime
+  dueDate               DateTime?
+  subtotal              Int
+  factoringFee          Int?
+  total                 Int
+  status                InvoiceStatus @default(DRAFT)
+  isFactored            Boolean       @default(false)
+  notes                 String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  emailLogs             EmailLog[]    @relation("InvoiceEmailLogs")
+  company               Company       @relation(fields: [companyId], references: [id])
+  customer              Customer      @relation(fields: [customerId], references: [id])
+  lines                 InvoiceLine[]
+  loadLinks             InvoiceLoad[]
+  payments              Payment[]
+  tasks                 Task[]        @relation("InvoiceTasks")
+}
+
+model InvoiceLine {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  description String
+  quantity    Int     @default(1)
+  unitAmount  Int
+  total       Int
+  invoice     Invoice @relation(fields: [invoiceId], references: [id])
+}
+
+model InvoiceLoad {
+  id        String  @id @default(uuid())
+  invoiceId String
+  loadId    String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+  load      Load    @relation(fields: [loadId], references: [id])
+}
+
+model Payment {
+  id         String        @id @default(uuid())
+  companyId  String
+  customerId String
+  invoiceId  String
+  amount     Int
+  method     PaymentMethod @default(ACH)
+  receivedAt DateTime
+  notes      String?
+  createdAt  DateTime      @default(now())
+  company    Company       @relation(fields: [companyId], references: [id])
+  customer   Customer      @relation(fields: [customerId], references: [id])
+  invoice    Invoice       @relation(fields: [invoiceId], references: [id])
+}
+
+model Task {
+  id                String     @id @default(uuid())
+  companyId         String
+  userId            String
+  type              TaskType
+  status            TaskStatus @default(PENDING)
+  relatedCustomerId String?
+  relatedLoadId     String?
+  relatedInvoiceId  String?
+  dueAt             DateTime?
+  completedAt       DateTime?
+  notes             String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  company           Company    @relation(fields: [companyId], references: [id])
+  relatedCustomer   Customer?  @relation("CustomerTasks", fields: [relatedCustomerId], references: [id])
+  relatedInvoice    Invoice?   @relation("InvoiceTasks", fields: [relatedInvoiceId], references: [id])
+  relatedLoad       Load?      @relation("LoadTasks", fields: [relatedLoadId], references: [id])
+  user              User       @relation("UserTasks", fields: [userId], references: [id])
+}
+
+model EmailTemplate {
+  id        String     @id @default(uuid())
+  companyId String
+  name      String
+  slug      String     @unique
+  subject   String
+  htmlBody  String
+  textBody  String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  emailLogs EmailLog[]
+  company   Company    @relation(fields: [companyId], references: [id])
+}
+
+model EmailLog {
+  id                String         @id @default(uuid())
+  companyId         String
+  templateId        String?
+  toEmail           String
+  subject           String
+  bodyPreview       String?
+  status            EmailStatus    @default(QUEUED)
+  sentAt            DateTime?
+  errorMessage      String?
+  relatedCustomerId String?
+  relatedInvoiceId  String?
+  createdAt         DateTime       @default(now())
+  company           Company        @relation(fields: [companyId], references: [id])
+  relatedCustomer   Customer?      @relation(fields: [relatedCustomerId], references: [id])
+  relatedInvoice    Invoice?       @relation("InvoiceEmailLogs", fields: [relatedInvoiceId], references: [id])
+  template          EmailTemplate? @relation(fields: [templateId], references: [id])
+}
+
+model MetricSnapshot {
+  id          String     @id @default(uuid())
+  companyId   String
+  periodStart DateTime
+  periodEnd   DateTime
+  metricType  MetricType
+  valueNumber Float
+  payloadJson String?
+  createdAt   DateTime   @default(now())
+  company     Company    @relation(fields: [companyId], references: [id])
+}
+
+model ExpansionReadinessSnapshot {
+  id                String   @id @default(uuid())
+  companyId         String
+  calculatedAt      DateTime
+  score             Int
+  recommendedAction String?
+  inputsJson        String?
+  createdAt         DateTime @default(now())
+  company           Company  @relation(fields: [companyId], references: [id])
+}
+
+model DashboardWidgetLayout {
+  id        String   @id @default(uuid())
+  userId    String
+  widgetId  String
+  x         Int
+  y         Int
+  w         Int
+  h         Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, widgetId])
+}
+
+model Document {
+  id         String    @id @default(uuid())
+  companyId  String
+  userId     String?
+  loadId     String?
+  customerId String?
+  driverId   String?
+  truckId    String?
+  trailerId  String?
+  fileName   String
+  fileType   String?
+  fileSize   Int?
+  storageKey String
+  createdAt  DateTime  @default(now())
+  company    Company   @relation(fields: [companyId], references: [id])
+  customer   Customer? @relation("CustomerDocuments", fields: [customerId], references: [id])
+  driver     Driver?   @relation("DriverDocuments", fields: [driverId], references: [id])
+  load       Load?     @relation("LoadDocuments", fields: [loadId], references: [id])
+  trailer    Trailer?  @relation("TrailerDocuments", fields: [trailerId], references: [id])
+  truck      Truck?    @relation("TruckDocuments", fields: [truckId], references: [id])
+  user       User?     @relation(fields: [userId], references: [id])
+}
 
 enum UserRole {
   OWNER
@@ -21,9 +508,9 @@ enum UserRole {
 }
 
 enum CustomerStatus {
-  PROSPECT      // Has not run a load yet.
-  ACTIVE        // Has run loads recently.
-  DORMANT       // No loads in > 365 days.
+  PROSPECT
+  ACTIVE
+  DORMANT
 }
 
 enum LeadStatus {
@@ -42,7 +529,7 @@ enum LoadStatus {
   INVOICED
   PAID
   CANCELLED
-  TONU         // For TONU loads.
+  TONU
 }
 
 enum StopType {
@@ -128,735 +615,4 @@ enum MetricType {
   AR_OUTSTANDING
   CUSTOMER_CONCENTRATION
   CUSTOM
-}
-
-///////////////////////////
-// COMPANY (multi-tenant root)
-///////////////////////////
-
-model Company {
-  id               String                 @id @default(uuid())
-  name             String
-
-  dotNumber        String?
-  mcNumber         String?
-
-  defaultDaysToPay Int?
-  expandThreshold  Int?                   // For “ready to expand” later.
-
-  timezone         String?                // For date calculations & reminders.
-  defaultCurrency  String?                // e.g. "USD".
-  defaultFuelMpg   Float?
-  defaultTruckFixedCostPerDay Int?
-
-  users            User[]
-  customers        Customer[]
-  drivers          Driver[]
-  trucks           Truck[]
-  trailers         Trailer[]
-  loads            Load[]
-  expenses         Expense[]
-  locations        Location[]
-  contacts         Contact[]
-  callNotes        CallNote[]
-  documents        Document[]
-  dashboardLayouts DashboardWidgetLayout[]
-  invoices         Invoice[]
-  payments         Payment[]
-  tasks            Task[]
-  emailTemplates   EmailTemplate[]
-  emailLogs        EmailLog[]
-  metricSnapshots  MetricSnapshot[]
-  expansionSnapshots ExpansionReadinessSnapshot[]
-
-  createdAt        DateTime               @default(now())
-  updatedAt        DateTime               @updatedAt
-}
-
-///////////////////////////
-// USER
-///////////////////////////
-
-model User {
-  id               String                 @id @default(uuid())
-  companyId        String
-  company          Company                @relation(fields: [companyId], references: [id])
-
-  email            String                 @unique
-  passwordHash     String
-
-  role             UserRole               @default(DISPATCHER)
-  fullName         String?
-  isActive         Boolean                @default(true)
-
-  loads            Load[]                 @relation("UserLoads")
-  expenses         Expense[]
-  customers        Customer[]
-  callNotes        CallNote[]
-  dashboardLayouts DashboardWidgetLayout[]
-  documents        Document[]
-  tasksAssigned    Task[]                 @relation("UserTasks")
-
-  createdAt        DateTime               @default(now())
-  updatedAt        DateTime               @updatedAt
-}
-
-///////////////////////////
-// CUSTOMER (prospect / active / dormant)
-///////////////////////////
-
-model Customer {
-  id           String          @id @default(uuid())
-  companyId    String
-  company      Company         @relation(fields: [companyId], references: [id])
-
-  userId       String          // Owner/creator for now.
-  user         User            @relation(fields: [userId], references: [id])
-
-  name         String
-  type         String?         // Broker / Shipper / etc (legacy simple string for now).
-  mcNumber     String?
-  email        String?
-  phone        String?
-
-  status       CustomerStatus  @default(PROSPECT) // Prospect / Active / Dormant.
-  leadStatus   LeadStatus?                        // Hot / Warm / Cold / etc.
-
-  daysToPay    Int?                               // For payment aging coloring.
-
-  convertedAt  DateTime?                          // When they first became ACTIVE.
-  dormantAt    DateTime?                          // When we marked them dormant.
-
-  // Address
-  addressLine1 String?
-  addressLine2 String?
-  city         String?
-  state        String?
-  postalCode   String?
-  country      String?         @default("US")
-
-  // Company-level notes (credit, billing, etc), editable.
-  companyNotes String?
-
-  // Legacy notes field (kept for compatibility).
-  notes        String?
-
-  // Credit / billing
-  creditLimit  Int?
-  creditHold   Boolean         @default(false)
-  billingEmail String?
-  portalUrl    String?
-
-  loads        Load[]
-  callNotes    CallNote[]
-  contacts     Contact[]
-  documents    Document[]      @relation("CustomerDocuments")
-  invoices     Invoice[]
-  payments     Payment[]
-  emailLogs    EmailLog[]
-  tasks        Task[]          @relation("CustomerTasks")
-
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-  deletedAt    DateTime?       // Soft-delete marker.
-}
-
-///////////////////////////
-// CALL NOTE (CRM timeline)
-///////////////////////////
-
-model CallNote {
-  id          String   @id @default(uuid())
-
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-
-  customerId  String
-  customer    Customer @relation(fields: [customerId], references: [id])
-
-  content     String
-  createdAt   DateTime @default(now())
-}
-
-///////////////////////////
-// LOAD
-///////////////////////////
-
-model Load {
-  id            String      @id @default(uuid())
-
-  companyId     String
-  company       Company     @relation(fields: [companyId], references: [id])
-
-  userId        String      // Creator.
-  user          User        @relation("UserLoads", fields: [userId], references: [id])
-
-  customerId    String?
-  customer      Customer?   @relation(fields: [customerId], references: [id])
-
-  // Identifiers
-  loadNumber        String? // Internal load number.
-  externalReference String? // Broker/shipper load number.
-
-  // Original financial fields
-  broker        String?
-  rate          Int         // Total revenue.
-  miles         Int
-  fuelCost      Int
-  lumper        Int?
-  tolls         Int?
-  otherCosts    Int?
-
-  // New tracking fields
-  status        LoadStatus  @default(DRAFT)
-  isTeam        Boolean     @default(false)
-
-  loadValue     Int?        // Cargo value.
-  commodity     String?
-  equipment     EquipmentType @default(DRY_VAN)
-  temperature   Float?
-
-  // Service exceptions / extras
-  tonuReason    String?
-  detentionHours Int?
-  layoverDays    Int?
-
-  // Equipment
-  truckId       String?
-  truck         Truck?      @relation(fields: [truckId], references: [id])
-
-  trailerId     String?
-  trailer       Trailer?    @relation(fields: [trailerId], references: [id])
-
-  // Drivers
-  loadDrivers   LoadDriver[]
-
-  // Stops for multi-PU/DEL
-  stops         LoadStop[]
-
-  // Expenses tied to this load
-  expenses      Expense[]
-
-  // Invoices (via join table)
-  invoiceLinks  InvoiceLoad[]
-
-  // Primary PU/DEL dates (for quick filters)
-  pickupDate    DateTime?
-  deliveryDate  DateTime?
-
-  // Payment / invoicing
-  invoicedAt    DateTime?
-  isPaid        Boolean     @default(false)
-  paidAt        DateTime?
-
-  // Soft delete
-  isSoftDeleted Boolean     @default(false)
-  deletedAt     DateTime?
-
-  documents     Document[]  @relation("LoadDocuments")
-  tasks         Task[]      @relation("LoadTasks")
-
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-}
-
-model LoadStop {
-  id           String    @id @default(uuid())
-
-  loadId       String
-  load         Load      @relation(fields: [loadId], references: [id])
-
-  sequence     Int       // 0..n.
-  type         StopType  // PICKUP or DELIVERY.
-
-  locationId   String?
-  location     Location? @relation(fields: [locationId], references: [id])
-
-  // Inline override if not using saved Location:
-  name         String?
-  addressLine1 String?
-  addressLine2 String?
-  city         String?
-  state        String?
-  postalCode   String?
-  country      String?   @default("US")
-
-  scheduledAt  DateTime?
-  arrivedAt    DateTime?
-  departedAt   DateTime?
-
-  bolNumber    String?
-  pickupNumber String?
-  notes        String?
-
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-}
-
-model LoadDriver {
-  id        String   @id @default(uuid())
-
-  loadId    String
-  load      Load     @relation(fields: [loadId], references: [id])
-
-  driverId  String
-  driver    Driver   @relation(fields: [driverId], references: [id])
-
-  role      String?  // "PRIMARY", "CO_DRIVER", etc.
-}
-
-///////////////////////////
-// DRIVER
-///////////////////////////
-
-model Driver {
-  id        String   @id @default(uuid())
-
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  firstName  String
-  lastName   String
-  driverCode String? @unique
-
-  isActive Boolean @default(true)
-
-  // HR-ish fields
-  hireDate       DateTime?
-  terminationDate DateTime?
-  licenseNumber  String?
-  licenseState   String?
-
-  loadAssignments LoadDriver[]
-  documents       Document[] @relation("DriverDocuments")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-///////////////////////////
-// TRUCK
-///////////////////////////
-
-model Truck {
-  id        String   @id @default(uuid())
-
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  unitNumber String       // Truck number in the fleet.
-  vin        String? @unique
-  year       Int?
-  make       String?
-  model      String?
-  type       String?      // e.g., "Daycab", "Sleeper"
-
-  status         TruckStatus  @default(ACTIVE)
-  condition      String?
-  inactiveReason String?
-
-  // Cost / maintenance
-  odometer       Int?
-  lastPmAt       DateTime?
-  purchasePrice  Int?
-  monthlyPayment Int?
-
-  // Relationships
-  trailers Trailer[]                      // Backref for Trailer.assignedTruckId.
-  loads    Load[]                         // Loads that used this truck.
-  expenses Expense[]                      // Expenses tied to this truck.
-  documents Document[] @relation("TruckDocuments")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-///////////////////////////
-// TRAILER
-///////////////////////////
-
-model Trailer {
-  id        String   @id @default(uuid())
-
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  trailerNumber String
-  year          Int?
-  type          TrailerType @default(DRY_VAN)
-  lengthFeet    Int?
-
-  status         TrailerStatus @default(ACTIVE)
-  condition      String?
-  inactiveReason String?
-
-  isReefer     Boolean @default(false)
-  hasAirChute  Boolean @default(false)
-  airChuteType String?
-
-  // Current assignment to a truck (optional).
-  assignedTruckId String?
-  assignedTruck   Truck?   @relation(fields: [assignedTruckId], references: [id])
-
-  loads    Load[]                         // Loads this trailer has been on.
-  expenses Expense[]                      // Expenses tied to this trailer.
-  documents Document[] @relation("TrailerDocuments")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-///////////////////////////
-// LOCATION (shipper / receiver)
-///////////////////////////
-
-model Location {
-  id              String    @id @default(uuid())
-
-  companyId       String
-  company         Company   @relation(fields: [companyId], references: [id])
-
-  name            String
-  isShipper       Boolean   @default(true)
-  isReceiver      Boolean   @default(true)
-
-  addressLine1    String?
-  addressLine2    String?
-  city            String?
-  state           String?
-  postalCode      String?
-  country         String?   @default("US")
-
-  shippingHours   String?
-  notes           String?
-
-  contacts        Contact[]
-  stops           LoadStop[]
-
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-}
-
-///////////////////////////
-// CONTACTS
-///////////////////////////
-
-model Contact {
-  id          String    @id @default(uuid())
-
-  companyId   String
-  company     Company   @relation(fields: [companyId], references: [id])
-
-  customerId  String?
-  customer    Customer? @relation(fields: [customerId], references: [id])
-
-  locationId  String?
-  location    Location? @relation(fields: [locationId], references: [id])
-
-  name        String
-  role        String?
-  email       String?
-  phone       String?
-  notes       String?
-
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-}
-
-///////////////////////////
-// EXPENSE
-///////////////////////////
-
-model Expense {
-  id             String   @id @default(uuid())
-
-  companyId      String
-  company        Company  @relation(fields: [companyId], references: [id])
-
-  userId         String
-  user           User     @relation(fields: [userId], references: [id])
-
-  loadId         String?
-  load           Load?    @relation(fields: [loadId], references: [id])
-
-  truckId        String?
-  truck          Truck?   @relation(fields: [truckId], references: [id])
-
-  trailerId      String?
-  trailer        Trailer? @relation(fields: [trailerId], references: [id])
-
-  categoryGroup  String?
-  categoryKey    String?
-  label          String?
-
-  amount         Int
-  description    String?
-  incurredAt     DateTime @default(now())
-  isRecurring    Boolean  @default(false)
-  recurrenceFreq String?
-
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-}
-
-///////////////////////////
-// INVOICING & PAYMENTS
-///////////////////////////
-
-model Invoice {
-  id        String   @id @default(uuid())
-
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id])
-
-  invoiceNumber         String  // Your internal invoice number.
-  externalInvoiceNumber String? // Broker/customer invoice reference.
-
-  issueDate DateTime
-  dueDate   DateTime?
-
-  subtotal    Int
-  factoringFee Int?
-  total       Int
-
-  status    InvoiceStatus @default(DRAFT)
-  isFactored Boolean      @default(false)
-
-  notes     String?
-
-  lines      InvoiceLine[]
-  payments   Payment[]
-  loadLinks  InvoiceLoad[]
-  emailLogs  EmailLog[]   @relation("InvoiceEmailLogs")
-  tasks      Task[]       @relation("InvoiceTasks")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model InvoiceLine {
-  id        String   @id @default(uuid())
-
-  invoiceId String
-  invoice   Invoice  @relation(fields: [invoiceId], references: [id])
-
-  description String
-  quantity    Int      @default(1)
-  unitAmount  Int      // Amount per unit in cents.
-  total       Int      // quantity * unitAmount, stored for convenience.
-}
-
-model InvoiceLoad {
-  id        String   @id @default(uuid())
-
-  invoiceId String
-  invoice   Invoice  @relation(fields: [invoiceId], references: [id])
-
-  loadId    String
-  load      Load     @relation(fields: [loadId], references: [id])
-}
-
-model Payment {
-  id        String   @id @default(uuid())
-
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id])
-
-  invoiceId String
-  invoice   Invoice  @relation(fields: [invoiceId], references: [id])
-
-  amount     Int
-  method     PaymentMethod @default(ACH)
-  receivedAt DateTime
-  notes      String?
-
-  createdAt DateTime @default(now())
-}
-
-///////////////////////////
-// TASKS / REMINDERS
-///////////////////////////
-
-model Task {
-  id        String   @id @default(uuid())
-
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  userId    String
-  user      User     @relation("UserTasks", fields: [userId], references: [id])
-
-  type      TaskType
-  status    TaskStatus @default(PENDING)
-
-  relatedCustomerId String?
-  relatedCustomer   Customer? @relation("CustomerTasks", fields: [relatedCustomerId], references: [id])
-
-  relatedLoadId String?
-  relatedLoad   Load?    @relation("LoadTasks", fields: [relatedLoadId], references: [id])
-
-  relatedInvoiceId String?
-  relatedInvoice   Invoice? @relation("InvoiceTasks", fields: [relatedInvoiceId], references: [id])
-
-  dueAt       DateTime?
-  completedAt DateTime?
-
-  notes       String?
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
-///////////////////////////
-// EMAIL TEMPLATES & LOGS
-///////////////////////////
-
-model EmailTemplate {
-  id        String   @id @default(uuid())
-
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  name      String
-  slug      String   @unique
-
-  subject   String
-  htmlBody  String
-  textBody  String?
-
-  emailLogs EmailLog[]  // ⬅️ ADD THIS LINE (back-reference from EmailLog.template)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model EmailLog {
-  id        String   @id @default(uuid())
-
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  templateId String?
-  template   EmailTemplate? @relation(fields: [templateId], references: [id])
-
-  toEmail    String
-  subject    String
-  bodyPreview String?
-
-  status     EmailStatus @default(QUEUED)
-  sentAt     DateTime?
-  errorMessage String?
-
-  relatedCustomerId String?
-  relatedCustomer   Customer? @relation(fields: [relatedCustomerId], references: [id])
-
-  relatedInvoiceId String?
-  relatedInvoice   Invoice? @relation("InvoiceEmailLogs", fields: [relatedInvoiceId], references: [id])
-
-  createdAt DateTime @default(now())
-}
-
-///////////////////////////
-// METRICS & EXPANSION
-///////////////////////////
-
-model MetricSnapshot {
-  id        String   @id @default(uuid())
-
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  periodStart DateTime
-  periodEnd   DateTime
-
-  metricType  MetricType
-  valueNumber Float
-  payloadJson String?   // Extra details (e.g., breakdown by truck, customer).
-
-  createdAt   DateTime @default(now())
-}
-
-model ExpansionReadinessSnapshot {
-  id        String   @id @default(uuid())
-
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  calculatedAt     DateTime
-  score            Int        // 0–100 readiness.
-  recommendedAction String?
-  inputsJson       String?    // What metrics fed this score.
-
-  createdAt        DateTime @default(now())
-}
-
-///////////////////////////
-// DASHBOARD LAYOUT
-///////////////////////////
-
-model DashboardWidgetLayout {
-  id        String   @id @default(uuid())
-
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-
-  widgetId  String
-
-  x         Int
-  y         Int
-  w         Int
-  h         Int
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, widgetId])
-}
-
-///////////////////////////
-// DOCUMENTS (for uploads later)
-///////////////////////////
-
-model Document {
-  id            String    @id @default(uuid())
-
-  companyId     String
-  company       Company   @relation(fields: [companyId], references: [id])
-
-  userId        String?
-  user          User?     @relation(fields: [userId], references: [id])
-
-  loadId        String?
-  load          Load?     @relation("LoadDocuments", fields: [loadId], references: [id])
-
-  customerId    String?
-  customer      Customer? @relation("CustomerDocuments", fields: [customerId], references: [id])
-
-  driverId      String?
-  driver        Driver?   @relation("DriverDocuments", fields: [driverId], references: [id])
-
-  truckId       String?
-  truck         Truck?    @relation("TruckDocuments", fields: [truckId], references: [id])
-
-  trailerId     String?
-  trailer       Trailer?  @relation("TrailerDocuments", fields: [trailerId], references: [id])
-
-  fileName      String
-  fileType      String?
-  fileSize      Int?
-  storageKey    String
-
-  createdAt     DateTime  @default(now())
 }
