@@ -1,106 +1,225 @@
-import { NextRequest, NextResponse } from "next/server";        // Imports Next.js helpers for handling requests and responses.
-import { db } from "@/lib/db";                                  // Imports the Prisma client for DB access.
+import { NextRequest, NextResponse } from "next/server";                    // Next.js helper types for handling requests/responses.
+import { db } from "@/lib/db";                                              // Prisma client for database access.
+import { getDemoTenant } from "@/lib/demoTenant";                           // Demo tenant helper that provides the current company + user for now.
 
-// GET /api/expenses/:id → fetch a single expense by ID.
+/**
+ * GET /api/expenses/:id
+ * Fetch a single expense by ID, scoped to the current company.
+ */
 export async function GET(
-  req: NextRequest,                                             // Incoming HTTP request (not used here).
-  { params }: { params: Promise<{ id?: string }> }              // In your setup, `params` is a Promise, so we type it that way.
+  _req: NextRequest,                                                        // Incoming request; unused here.
+  context: { params: Promise<{ id?: string }> }                             // Dynamic route params wrapped in a Promise (App Router behavior).
 ) {
   try {
-    const { id } = await params;                                // Awaits the params Promise and extracts the `id` value.
+    const { company } = await getDemoTenant();                              // Resolve company context to enforce multi-tenancy.
 
-    if (!id) {                                                  // Guard: without an ID, we can't fetch a specific expense.
+    const { id } = await context.params;                                    // Await the params Promise and destructure `id`.
+    if (!id) {                                                              // Guard: if no ID was provided in the URL...
+      return NextResponse.json(
+        { error: "Expense ID is required" },                                // Inform the client they must pass an ID.
+        { status: 400 }                                                     // HTTP 400 = bad request.
+      );
+    }
+
+    const expense = await db.expense.findFirst({                            // Look up a single expense row.
+      where: {
+        id,                                                                 // Match the specific expense ID.
+        companyId: company.id,                                              // Ensure it belongs to this company.
+      },
+    });
+
+    if (!expense) {                                                         // If no matching expense exists...
+      return NextResponse.json(
+        { error: "Expense not found" },                                     // Inform the client that the resource does not exist.
+        { status: 404 }                                                     // HTTP 404 = not found.
+      );
+    }
+
+    return NextResponse.json(expense);                                      // Return the expense as JSON with 200 OK.
+  } catch (err) {
+    console.error("[EXPENSE_GET_ERROR]", err);                              // Log any unexpected error for debugging.
+    return NextResponse.json(
+      { error: "Failed to fetch expense" },                                 // Generic error message for the client.
+      { status: 500 }                                                       // HTTP 500 = server error.
+    );
+  }
+}
+
+/**
+ * PUT /api/expenses/:id
+ * Update an existing expense. Supports partial updates.
+ */
+export async function PUT(
+  req: NextRequest,                                                         // Incoming request containing JSON with updated fields.
+  context: { params: Promise<{ id?: string }> }                             // Dynamic route params with `id`.
+) {
+  try {
+    const body = await req.json();                                          // Parse the JSON body into a plain object.
+    const { company } = await getDemoTenant();                              // Resolve company context.
+
+    const { id } = await context.params;                                    // Await params and grab the `id`.
+    if (!id) {                                                              // Guard: cannot update without an ID.
       return NextResponse.json(
         { error: "Expense ID is required" },
         { status: 400 }
       );
     }
 
-    const expense = await db.expense.findUnique({               // Queries the Expense table for one record.
-      where: { id },                                            // Filters by the provided ID.
+    const existing = await db.expense.findFirst({                           // Fetch the existing expense so we can merge updates safely.
+      where: {
+        id,                                                                 // Must match this expense.
+        companyId: company.id,                                              // Must belong to this company.
+      },
     });
 
-    if (!expense) {                                             // If no record is found for that ID...
+    if (!existing) {                                                        // If there is no such expense...
+      return NextResponse.json(
+        { error: "Expense not found" },                                     // Tell the client it doesn’t exist.
+        { status: 404 }
+      );
+    }
+
+    // Normalize/validate fields.
+    let nextAmount = existing.amount;                                       // Start with existing amount.
+    if (body.amount !== undefined) {                                        // If amount is provided in the payload...
+      const amountNumber = Number(body.amount);                             // Coerce to number.
+      if (!Number.isFinite(amountNumber) || amountNumber <= 0) {            // Guard invalid or non-positive values.
+        return NextResponse.json(
+          { error: "Amount must be a positive number" },
+          { status: 400 }
+        );
+      }
+      nextAmount = Math.round(amountNumber);                                // Save the validated amount as an integer.
+    }
+
+    let nextIncurredAt = existing.incurredAt;                               // Start with existing incurred date.
+    if (body.incurredAt !== undefined) {                                    // If client wants to change it...
+      const candidate = new Date(body.incurredAt);                          // Parse the provided date string.
+      if (Number.isNaN(candidate.getTime())) {                              // Validate that it’s a real date.
+        return NextResponse.json(
+          { error: "Invalid incurredAt date" },
+          { status: 400 }
+        );
+      }
+      nextIncurredAt = candidate;                                           // Accept the new incurred date.
+    }
+
+    const isRecurring =
+      body.isRecurring !== undefined                                        // If isRecurring provided, use that; otherwise keep existing.
+        ? Boolean(body.isRecurring)
+        : existing.isRecurring;
+
+    const recurrenceFreq =
+      body.recurrenceFreq !== undefined                                     // If recurrenceFreq provided, use that (or null).
+        ? body.recurrenceFreq ?? null
+        : existing.recurrenceFreq;
+
+    if (isRecurring && !recurrenceFreq) {                                   // Enforce recurring rule on update as well.
+      return NextResponse.json(
+        { error: "recurrenceFreq is required when isRecurring is true" },
+        { status: 400 }
+      );
+    }
+
+    const updated = await db.expense.update({                               // Commit the updates to the database.
+      where: { id },                                                        // Target the specific expense by its ID.
+      data: {
+        amount: nextAmount,                                                 // Persist the normalized amount.
+        incurredAt: nextIncurredAt,                                         // Persist the normalized incurredAt date.
+
+        description:
+          body.description !== undefined                                    // Update description if provided.
+            ? body.description ?? null
+            : existing.description,
+
+        categoryGroup:
+          body.categoryGroup !== undefined                                  // Update categoryGroup if provided.
+            ? body.categoryGroup ?? null
+            : existing.categoryGroup,
+
+        categoryKey:
+          body.categoryKey !== undefined                                    // Update categoryKey if provided.
+            ? body.categoryKey ?? null
+            : existing.categoryKey,
+
+        label:
+          body.label !== undefined                                          // Update label if provided.
+            ? body.label ?? null
+            : existing.label,
+
+        isRecurring,                                                        // Persist normalized isRecurring.
+        recurrenceFreq,                                                     // Persist normalized recurrenceFreq.
+
+        loadId:
+          body.loadId !== undefined                                         // Update loadId if explicitly provided.
+            ? body.loadId ?? null
+            : existing.loadId,
+
+        truckId:
+          body.truckId !== undefined                                        // Update truckId if explicitly provided.
+            ? body.truckId ?? null
+            : existing.truckId,
+
+        trailerId:
+          body.trailerId !== undefined                                      // Update trailerId if explicitly provided.
+            ? body.trailerId ?? null
+            : existing.trailerId,
+      },
+    });
+
+    return NextResponse.json(updated);                                      // Return the updated expense object to the client.
+  } catch (err) {
+    console.error("[EXPENSE_UPDATE_ERROR]", err);                           // Log the error for debugging.
+    return NextResponse.json(
+      { error: "Failed to update expense" },                                // Generic failure message.
+      { status: 500 }                                                       // HTTP 500 = server-side error.
+    );
+  }
+}
+
+/**
+ * DELETE /api/expenses/:id
+ * Permanently deletes an expense for the current company.
+ */
+export async function DELETE(
+  _req: NextRequest,                                                        // Incoming request; unused.
+  context: { params: Promise<{ id?: string }> }                             // Dynamic params with `id`.
+) {
+  try {
+    const { company } = await getDemoTenant();                              // Resolve company context.
+
+    const { id } = await context.params;                                    // Await params and extract `id`.
+    if (!id) {                                                              // Guard: cannot delete without ID.
+      return NextResponse.json(
+        { error: "Expense ID is required" },
+        { status: 400 }
+      );
+    }
+
+    const existing = await db.expense.findFirst({                           // Ensure the expense exists and belongs to this company.
+      where: {
+        id,
+        companyId: company.id,
+      },
+    });
+
+    if (!existing) {                                                        // If no matching expense...
       return NextResponse.json(
         { error: "Expense not found" },
         { status: 404 }
       );
     }
 
-    return NextResponse.json(expense);                          // Returns the found expense as JSON.
-  } catch (err) {
-    console.error("[EXPENSE_GET_ERROR]", err);                  // Logs the error for backend debugging.
-    return NextResponse.json(
-      { error: "Failed to fetch expense" },
-      { status: 500 }
-    );
-  }
-}
-
-// PUT /api/expenses/:id → update an existing expense.
-export async function PUT(
-  req: NextRequest,                                             // Incoming request containing updated expense data.
-  { params }: { params: Promise<{ id?: string }> }              // Params Promise that includes the expense ID.
-) {
-  try {
-    const { id } = await params;                                // Await params and extract the ID.
-
-    if (!id) {                                                  // Guard: ID is required to update a specific record.
-      return NextResponse.json(
-        { error: "Expense ID is required" },
-        { status: 400 }
-      );
-    }
-
-    const data = await req.json();                              // Parses JSON body into a JS object.
-
-    const updated = await db.expense.update({                   // Updates the expense in the database.
-      where: { id },                                            // Selects which expense to update using the ID.
-      data: {
-        category: data.category,                                // Updated category.
-        amount: Number(data.amount),                            // Updated amount, converted to number.
-        description: data.description ?? null,                  // Updated description or null.
-        incurredAt: data.incurredAt                             // If a new incurredAt is provided...
-          ? new Date(data.incurredAt)                           // ...convert it to Date.
-          : undefined,                                          // If not provided, don't change the existing value.
-      },
+    await db.expense.delete({                                               // Delete the expense row from the database.
+      where: { id },                                                        // Target by primary key.
     });
 
-    return NextResponse.json(updated);                          // Returns the updated expense as JSON.
+    return NextResponse.json({ success: true });                            // Respond with a simple success flag.
   } catch (err) {
-    console.error("[EXPENSE_UPDATE_ERROR]", err);               // Logs any errors that occur.
+    console.error("[EXPENSE_DELETE_ERROR]", err);                           // Log the error for server-side debugging.
     return NextResponse.json(
-      { error: "Failed to update expense" },
-      { status: 500 }
-    );
-  }
-}
-
-// DELETE /api/expenses/:id → delete an expense by ID.
-export async function DELETE(
-  req: NextRequest,                                             // Incoming request (not used).
-  { params }: { params: Promise<{ id?: string }> }              // Params Promise with the `id` we need.
-) {
-  try {
-    const { id } = await params;                                // Await params and grab the ID.
-
-    if (!id) {                                                  // Guard: ID is required to know what to delete.
-      return NextResponse.json(
-        { error: "Expense ID is required" },
-        { status: 400 }
-      );
-    }
-
-    await db.expense.delete({                                   // Calls Prisma to delete the matching expense row.
-      where: { id },                                            // Filters by the provided ID.
-    });
-
-    return NextResponse.json({ success: true });                // Returns a simple success flag.
-  } catch (err) {
-    console.error("[EXPENSE_DELETE_ERROR]", err);               // Logs any errors thrown during delete.
-    return NextResponse.json(
-      { error: "Failed to delete expense" },
-      { status: 500 }
+      { error: "Failed to delete expense" },                                // Generic error payload.
+      { status: 500 }                                                       // HTTP 500 = internal server error.
     );
   }
 }

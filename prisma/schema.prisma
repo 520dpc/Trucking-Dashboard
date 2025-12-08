@@ -300,27 +300,27 @@ model Contact {
 }
 
 model Expense {
-  id             String   @id @default(uuid())
+  id             String          @id @default(uuid())
   userId         String
   amount         Int
   description    String?
-  incurredAt     DateTime @default(now())
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  incurredAt     DateTime        @default(now())
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
   categoryGroup  String?
   categoryKey    String?
-  isRecurring    Boolean  @default(false)
+  isRecurring    Boolean         @default(false)
   label          String?
-  recurrenceFreq String?
+  recurrenceFreq RecurrenceFreq?
   companyId      String
   loadId         String?
   trailerId      String?
   truckId        String?
-  company        Company  @relation(fields: [companyId], references: [id])
-  load           Load?    @relation(fields: [loadId], references: [id])
-  trailer        Trailer? @relation(fields: [trailerId], references: [id])
-  truck          Truck?   @relation(fields: [truckId], references: [id])
-  user           User     @relation(fields: [userId], references: [id])
+  company        Company         @relation(fields: [companyId], references: [id])
+  load           Load?           @relation(fields: [loadId], references: [id])
+  trailer        Trailer?        @relation(fields: [trailerId], references: [id])
+  truck          Truck?          @relation(fields: [truckId], references: [id])
+  user           User            @relation(fields: [userId], references: [id])
 }
 
 model Invoice {
@@ -615,4 +615,11 @@ enum MetricType {
   AR_OUTSTANDING
   CUSTOMER_CONCENTRATION
   CUSTOM
+}
+
+enum RecurrenceFreq {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  ANNUAL
 }
