@@ -21,6 +21,7 @@ export async function GET() {                                                // 
       include: {
         callNotes: true,                                                     // Includes related CallNote records so UI can show last contact, etc.
         loads: true,                                                         // Includes related Load records so we can compute performance later.
+        contacts: true,                                                      // ⬅ NEW: include related Contact records attached to each customer.
       },
     });
 
@@ -34,32 +35,6 @@ export async function GET() {                                                // 
   }
 }
 
-/**
- * POST /api/customers
- * Creates a new customer/prospect for the current company + user.
- *
- * Expected JSON body (example):
- * {
- *   "name": "Acme Logistics",
- *   "type": "BROKER",
- *   "mcNumber": "123456",
- *   "email": "dispatch@acme.com",
- *   "phone": "555-123-4567",
- *   "notes": "Likes drop trailers",
- *   "addressLine1": "123 Main St",
- *   "city": "Dallas",
- *   "state": "TX",
- *   "postalCode": "75001",
- *   "country": "US",
- *   "daysToPay": 30,
- *   "leadStatus": "WARM",
- *   "status": "PROSPECT",
- *   "billingEmail": "ap@acme.com",
- *   "creditHold": false,
- *   "creditLimit": 50000,
- *   "portalUrl": "https://portal.acme.com"
- * }
- */
 export async function POST(req: NextRequest) {                               // Defines the POST handler for /api/customers.
   try {
     const body = await req.json();                                           // Parses the JSON request body into a plain JS object.

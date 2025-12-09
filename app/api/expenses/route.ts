@@ -1,97 +1,136 @@
-import { NextRequest, NextResponse } from "next/server";                     // Provides types and helpers for handling HTTP requests and responses in Next.js API routes.
-import { db } from "@/lib/db";                                               // Prisma client instance used to talk to the PostgreSQL database.
-import { getDemoTenant } from "@/lib/demoTenant";                            // Helper that returns (or lazily creates) the demo Company + User pair for now.
+import { NextRequest, NextResponse } from "next/server";                       // \\ Next.js request/response helpers for app router API routes.
+import { db } from "@/lib/db";                                                 // \\ Shared Prisma client used to talk to the database.
+import { RecurrenceFreq } from "@prisma/client";                               // \\ Enum for valid recurrence frequencies as defined in Prisma schema.
 
-// GET /api/expenses → list all expenses for the current company (demo tenant for now).
-export async function GET(_req: NextRequest) {                               // Defines the GET handler for /api/expenses; Next.js calls this on incoming GET requests.
-  try {                                                                      // Wrap logic in try/catch so we can return clean 500 responses on error.
-    const { company } = await getDemoTenant();                               // Resolves the current company context (multi-tenant scope) using the demo tenant helper.
+// Temporary demo auth helper: reuses existing demo user + company if they exist.  \\ Ensures we don't create a new company and break scoping.
+async function getDemoAuthContext() {                                          // \\ Returns { user, company } for the demo environment.
+  let user = await db.user.findFirst({                                         // \\ Look for an existing demo user by email.
+    where: { email: "demo@demo.com" },                                         // \\ Hard-coded demo email until real auth is wired.
+    include: { company: true },                                                // \\ Also load the related company so we can reuse its ID.
+  });
 
-    const expenses = await db.expense.findMany({                             // Queries the Expense table for all expenses belonging to this company.
-      where: {
-        companyId: company.id,                                               // Scopes results to this specific company to enforce multi-tenancy.
+  if (user && user.company) {                                                  // \\ If we found a user AND it already has a company attached...
+    return { user, company: user.company };                                    // \\ ...just reuse that pair; this matches any existing expenses.
+  }
+
+  let company;                                                                 // \\ We'll resolve or create a company if needed.
+
+  if (user?.companyId) {                                                       // \\ If user exists but we didn't include company (or it's missing)...
+    company =
+      (await db.company.findUnique({ where: { id: user.companyId } })) ||      // \\ Try to load company by the stored companyId.
+      (await db.company.create({ data: { name: "Demo Company" } }));           // \\ If not found, create a new Demo Company.
+  } else {                                                                     // \\ If user has no companyId or user is null...
+    company =
+      (await db.company.findFirst()) ||                                        // \\ Reuse any existing company if one exists...
+      (await db.company.create({ data: { name: "Demo Company" } }));           // \\ ...otherwise create a fresh Demo Company.
+  }
+
+  if (!user) {                                                                 // \\ If we still don't have a demo user...
+    user = await db.user.create({                                              // \\ ...create one and attach it to the resolved company.
+      data: {
+        email: "demo@demo.com",                                                // \\ Demo identity email.
+        passwordHash: "placeholder",                                           // \\ Placeholder until we wire proper auth.
+        companyId: company.id,                                                 // \\ Attach to the company we resolved/created above.
+        fullName: "Demo User",                                                 // \\ Optional friendly name.
       },
-      orderBy: { incurredAt: "desc" },                                       // Sorts by incurred date, newest first, so the most recent expenses appear at the top.
+    });
+  } else if (!user.companyId) {                                                // \\ If user existed but had no companyId set...
+    user = await db.user.update({                                              // \\ ...patch the user to point at the resolved company.
+      where: { id: user.id },                                                  // \\ Matches the existing user row.
+      data: { companyId: company.id },                                         // \\ Sets companyId so future queries line up.
+    });
+  }
+
+  return { user, company };                                                    // \\ Final return object used by routes.
+}
+
+// GET /api/expenses → list expenses for the demo company.                     \\ Read endpoint to show all expenses scoped to demo company.
+export async function GET(_req: NextRequest) {                                 // \\ GET handler; we ignore the request body/query for now.
+  try {                                                                        // \\ Wrap main logic in try/catch for safe error handling.
+    const { company } = await getDemoAuthContext();                            // \\ Resolve demo company and user; we only need company here.
+
+    const expenses = await db.expense.findMany({                               // \\ Fetch expenses from the Expense table.
+      where: { companyId: company.id },                                        // \\ Scope by companyId so data is multi-tenant-safe.
+      orderBy: { incurredAt: "desc" },                                         // \\ Sort newest first by when the expense occurred.
     });
 
-    return NextResponse.json(expenses);                                      // Returns the array of expenses as JSON with default 200 OK status.
-  } catch (err) {                                                            // If anything throws above (DB issue, etc.)...
-    console.error("[EXPENSES_GET_ERROR]", err);                              // Log the error with a clear tag for debugging on the server.
-    return NextResponse.json(                                               // Respond with a generic 500 error payload.
-      { error: "Failed to fetch expenses" },                                 // High-level error message; we avoid leaking internals.
-      { status: 500 }                                                        // HTTP 500 = internal server error.
+    return NextResponse.json(expenses);                                        // \\ Return the list of expenses as JSON (may be empty array).
+  } catch (err) {                                                              // \\ If anything blows up...
+    console.error("[EXPENSES_GET_ERROR]", err);                                // \\ Log with a clear tag for debugging in server logs.
+    return NextResponse.json(                                                  
+      { error: "Failed to fetch expenses" },                                   // \\ Generic error object for the client.
+      { status: 500 }                                                          // \\ HTTP 500 = internal server error.
     );
   }
 }
 
-// POST /api/expenses → create a new expense for the current user + company.
-export async function POST(req: NextRequest) {                               // Defines the POST handler for /api/expenses.
+// POST /api/expenses → create a new expense for the demo user/company.        \\ Write endpoint to add new expense rows.
+export async function POST(req: NextRequest) {                                 // \\ POST handler; consumes JSON body.
   try {
-    const body = await req.json();                                           // Parses the incoming JSON body into a JavaScript object.
-    const { company, user } = await getDemoTenant();                         // Resolves current company + user (demo tenant for now).
+    const { user, company } = await getDemoAuthContext();                      // \\ Ensure we have a demo user + company to link the expense to.
+    const body = await req.json();                                             // \\ Parse JSON request body into a plain object.
 
-    const amountNumber = Number(body.amount);                                // Coerces the amount field to a number so Prisma can store it as Int.
-    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {               // Guard: amount must be a positive, finite number.
+    const {
+      amount,                                                                  // \\ Required numeric amount (in cents or dollars depending on your choice).
+      description,                                                             // \\ Optional free-text description of the expense.
+      categoryGroup,                                                           // \\ Optional higher-level category group (e.g. "FUEL").
+      categoryKey,                                                             // \\ Optional specific category key (e.g. "DIESEL").
+      isRecurring,                                                             // \\ Boolean flag indicating recurring or one-off.
+      label,                                                                   // \\ Optional custom label for the expense.
+      recurrenceFreq,                                                          // \\ Optional recurrence frequency (WEEKLY/MONTHLY/etc.).
+      loadId,                                                                  // \\ Optional link to a specific load.
+      trailerId,                                                               // \\ Optional link to a trailer.
+      truckId,                                                                 // \\ Optional link to a truck.
+      incurredAt,                                                              // \\ Optional explicit incurred date (YYYY-MM-DD).
+    } = body;                                                                  // \\ Destructure all fields from the incoming payload.
+
+    if (amount == null || isNaN(Number(amount))) {                             // \\ Validate amount: must be present and numeric.
       return NextResponse.json(
-        { error: "Amount must be a positive number" },                       // Clear error message for the client.
-        { status: 400 }                                                      // HTTP 400 = bad input from the client.
+        { error: "Amount is required and must be a number" },                  // \\ Explain why request is invalid.
+        { status: 400 }                                                        // \\ HTTP 400 = bad request (client input issue).
       );
     }
 
-    const isRecurring = Boolean(body.isRecurring);                           // Coerces isRecurring to a boolean so we can enforce rules reliably.
-    const recurrenceFreq = body.recurrenceFreq ?? null;                      // Normalizes recurrence frequency; null if not provided.
+    let freqValue: RecurrenceFreq | null = null;                               // \\ Will hold a properly typed enum value or null.
 
-    if (isRecurring && !recurrenceFreq) {                                    // Business rule: recurring expenses must specify a recurrence frequency.
-      return NextResponse.json(
-        { error: "recurrenceFreq is required when isRecurring is true" },    // Descriptive error so the frontend knows what to fix.
-        { status: 400 }                                                      // HTTP 400 = client-side validation failure.
-      );
+    if (recurrenceFreq) {                                                      // \\ If client sent a recurrenceFreq...
+      if (!Object.values(RecurrenceFreq).includes(recurrenceFreq)) {           // \\ Ensure it matches one of the enum values defined in Prisma.
+        return NextResponse.json(
+          {
+            error: `Invalid recurrenceFreq. Must be one of: ${Object.values(
+              RecurrenceFreq
+            ).join(", ")}`,                                                    // \\ Helpful error listing valid options.
+          },
+          { status: 400 }                                                      // \\ HTTP 400 = invalid client input.
+        );
+      }
+      freqValue = recurrenceFreq;                                              // \\ Safe to assign; TS + Prisma enums align here.
     }
 
-    const incurredAt = body.incurredAt                                      // Normalizes incurredAt to a Date object for Prisma.
-      ? new Date(body.incurredAt)                                           // If provided, parse the date string.
-      : new Date();                                                         // Otherwise default to "now".
-
-    if (Number.isNaN(incurredAt.getTime())) {                               // Guard: ensure incurredAt is a valid date.
-      return NextResponse.json(
-        { error: "Invalid incurredAt date" },                                // Client passed a bad date string.
-        { status: 400 }
-      );
-    }
-
-    const expense = await db.expense.create({                               // Creates a new Expense row in the database.
+    const expense = await db.expense.create({                                  // \\ Insert a new row into the Expense table.
       data: {
-        // REQUIRED FOREIGN KEYS
-        companyId: company.id,                                              // Attaches the expense to the current company (multi-tenant scope).
-        userId: user.id,                                                    // Attaches the expense to the current user (who created it).
-
-        // CORE FINANCIALS
-        amount: Math.round(amountNumber),                                   // Stores the amount as an integer; currently treating input as whole dollars.
-
-        description: body.description ?? null,                              // Optional description of the expense; null if missing.
-        incurredAt,                                                         // When the expense was incurred (for reporting and period grouping).
-
-        // CATEGORIZATION
-        categoryGroup: body.categoryGroup ?? null,                          // Broad group (FUEL, MAINTENANCE, etc.) or null.
-        categoryKey: body.categoryKey ?? null,                              // Normalized key derived from label (e.g., FUEL_DIESEL).
-        label: body.label ?? null,                                          // Human-friendly label (e.g., "Pilot Diesel", "Truck Lease").
-
-        isRecurring,                                                        // Boolean: whether this expense recurs.
-        recurrenceFreq,                                                     // Frequency string (e.g., MONTHLY) or null if not recurring.
-
-        // OPTIONAL LINKED ENTITIES
-        loadId: body.loadId ?? null,                                        // Optionally tie this expense to a specific load.
-        truckId: body.truckId ?? null,                                      // Optionally tie this expense to a truck.
-        trailerId: body.trailerId ?? null,                                  // Optionally tie this expense to a trailer.
+        userId: user.id,                                                       // \\ Link to the demo user who created this expense.
+        companyId: company.id,                                                 // \\ Link to the demo company for multi-tenant scoping.
+        amount: Number(amount),                                                // \\ Store amount as a number (parse from string if needed).
+        description: description ?? null,                                      // \\ Null if not provided for better DB hygiene.
+        categoryGroup: categoryGroup ?? null,                                  // \\ Optional group.
+        categoryKey: categoryKey ?? null,                                      // \\ Optional key.
+        isRecurring: Boolean(isRecurring),                                     // \\ Coerce truthy/falsy to real boolean.
+        label: label ?? null,                                                  // \\ Optional human-friendly label.
+        recurrenceFreq: freqValue,                                             // \\ Enum value or null.
+        incurredAt: incurredAt ? new Date(incurredAt) : undefined,             // \\ Use provided date or default (schema has default).
+        loadId: loadId ?? null,                                                // \\ Optional relations default to null.
+        trailerId: trailerId ?? null,
+        truckId: truckId ?? null,
       },
     });
 
-    return NextResponse.json(expense, { status: 201 });                     // Returns the created expense with HTTP 201 Created.
-  } catch (err) {
-    console.error("[EXPENSES_POST_ERROR]", err);                            // Logs the error for debugging.
-    return NextResponse.json(                                               // Sends a generic 500 error payload to the client.
-      { error: "Failed to create expense" },                                // Message indicates that creation failed.
-      { status: 500 }                                                       // HTTP 500 = server-side failure.
+    return NextResponse.json(expense, { status: 201 });                        // \\ Return the created expense with HTTP 201 Created.
+  } catch (err) {                                                              // \\ Catch any unexpected error.
+    console.error("[EXPENSES_POST_ERROR]", err);                               // \\ Log error for debugging.
+    return NextResponse.json(
+      { error: "Failed to create expense" },                                   // \\ Generic message back to client.
+      { status: 500 }                                                          // \\ HTTP 500 = internal server error.
     );
   }
 }

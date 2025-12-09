@@ -100,6 +100,7 @@ model Customer {
   loads        Load[]
   payments     Payment[]
   tasks        Task[]         @relation("CustomerTasks")
+  rentedTrailers Trailer[]    @relation("RentedTrailers")
 }
 
 model CallNote {
@@ -254,11 +255,18 @@ model Trailer {
   assignedTruckId String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+
+  // rental fields
+  isRentedOut        Boolean    @default(false)
+  rentalRateMonthly  Int?
+  rentedToCustomerId String?
+
   documents       Document[]    @relation("TrailerDocuments")
   expenses        Expense[]
   loads           Load[]
   assignedTruck   Truck?        @relation(fields: [assignedTruckId], references: [id])
   company         Company       @relation(fields: [companyId], references: [id])
+  rentedToCustomer Customer?    @relation("RentedTrailers", fields: [rentedToCustomerId], references: [id])
 }
 
 model Location {
