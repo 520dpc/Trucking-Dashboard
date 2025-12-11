@@ -390,25 +390,30 @@ model Payment {
 }
 
 model Task {
-  id                String     @id @default(uuid())
-  companyId         String
-  userId            String
-  type              TaskType
-  status            TaskStatus @default(PENDING)
-  relatedCustomerId String?
-  relatedLoadId     String?
-  relatedInvoiceId  String?
-  dueAt             DateTime?
-  completedAt       DateTime?
-  notes             String?
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
-  company           Company    @relation(fields: [companyId], references: [id])
-  relatedCustomer   Customer?  @relation("CustomerTasks", fields: [relatedCustomerId], references: [id])
-  relatedInvoice    Invoice?   @relation("InvoiceTasks", fields: [relatedInvoiceId], references: [id])
-  relatedLoad       Load?      @relation("LoadTasks", fields: [relatedLoadId], references: [id])
-  user              User       @relation("UserTasks", fields: [userId], references: [id])
+  id                String     @id @default(uuid())                     // Primary key for the task.
+  companyId         String                                              // Owning company (tenant scope).
+  userId            String                                              // User responsible / assigned to the task.
+  type              TaskType                                            // What kind of task it is (CALL_CUSTOMER, FOLLOW_UP_PROSPECT, etc.).
+  status            TaskStatus @default(PENDING)                        // Which column the task is in on the board.
+  order             Int        @default(0)                              // Sort index *within* the current status column (0 = top).
+  relatedCustomerId String?                                             // Optional link to a customer record.
+  relatedLoadId     String?                                             // Optional link to a load.
+  relatedInvoiceId  String?                                             // Optional link to an invoice.
+  dueAt             DateTime?                                           // Optional due date.
+  completedAt       DateTime?                                           // When the task was completed (for DONE).
+  notes             String?                                             // Free-text notes about the task.
+  createdAt         DateTime   @default(now())                          // When the task was created.
+  updatedAt         DateTime   @updatedAt                               // Auto-updated timestamp on change.
+
+  company           Company    @relation(fields: [companyId], references: [id])                 // Relation back to Company.
+  relatedCustomer   Customer?  @relation("CustomerTasks", fields: [relatedCustomerId], references: [id]) // Relation to Customer.
+  relatedInvoice    Invoice?   @relation("InvoiceTasks", fields: [relatedInvoiceId], references: [id])   // Relation to Invoice.
+  relatedLoad       Load?      @relation("LoadTasks", fields: [relatedLoadId], references: [id])         // Relation to Load.
+  user              User       @relation("UserTasks", fields: [userId], references: [id])                // Relation to User (assignee).
+
+  @@index([companyId, status, order])                                   // Index to efficiently load tasks per company + column, sorted by order.
 }
+
 
 model EmailTemplate {
   id        String     @id @default(uuid())
