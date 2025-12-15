@@ -3,20 +3,20 @@ import { db } from "@/lib/db";                                         // Import
 import { getDemoTenant } from "@/lib/demoTenant";                      // Imports helper that returns (or creates) the demo Company + User.
 
 /**
- * GET /api/loads/:id
+ * GET /api/loads/:loadId
  * Fetch a single load by ID for the current company, including related data.
  */
-export async function GET(                                             // Defines the GET handler for /api/loads/[id].
+export async function GET(                                             // Defines the GET handler for /api/loads/[loadId].
   _req: NextRequest,                                                   // Incoming request object (unused here but required by signature).
-  context: { params: Promise<{ id?: string }> }                        // Next.js now passes `params` as a Promise that must be awaited.
+  { params }: { params: Promise<{ loadId?: string }> }                 // Next.js passes `params` as a Promise that must be awaited.
 ) {
   try {                                                                // Wraps the handler logic in try/catch for error handling.
     const { company } = await getDemoTenant();                         // Ensures we have a demo Company and retrieves it for scoping.
 
-    const resolvedParams = await context.params;                       // Awaits the Promise to get the actual params object.
-    const loadId = resolvedParams.id;                                  // Extracts the `id` value from the resolved params.
+    const resolvedParams = await params;                               // Awaits the Promise to get the actual params object.
+    const loadId = resolvedParams.loadId;                              // Extracts the `loadId` value from the resolved params.
 
-    if (!loadId) {                                                     // Guard: if no id is present after resolving params...
+    if (!loadId) {                                                     // Guard: if no loadId is present after resolving params...
       return NextResponse.json(                                        // Respond with a 400 Bad Request.
         { error: "Load ID is required" },                              // JSON payload explaining the missing ID.
         { status: 400 }                                                // HTTP 400 status code.
@@ -36,7 +36,7 @@ export async function GET(                                             // Define
         loadDrivers: {                                                 // Includes driver assignments for this load.
           include: { driver: true },                                   // Includes each Driver row associated to the load.
         },
-        stops: true,                                                   // Includes all LoadStop rows (pickups and deliveries).
+        stops: { orderBy: { sequence: "asc" } },                       // Includes stops ordered by sequence (PU/DEL order).
         documents: true,                                               // Includes any Document rows linked to the load.
         expenses: true,                                                // Includes any Expense rows associated with the load.
         invoiceLinks: {                                                // Includes links to invoices for this load.
@@ -63,19 +63,19 @@ export async function GET(                                             // Define
 }
 
 /**
- * PUT /api/loads/:id
+ * PUT /api/loads/:loadId
  * Update an existing load’s fields: financials, status, dates, assignments, etc.
  */
-export async function PUT(                                             // Defines the PUT handler for /api/loads/[id].
+export async function PUT(                                             // Defines the PUT handler for /api/loads/[loadId].
   req: NextRequest,                                                    // Incoming request object, which carries the JSON body.
-  context: { params: Promise<{ id?: string }> }                        // Route params passed as a Promise; must be awaited.
+  { params }: { params: Promise<{ loadId?: string }> }                 // Route params passed as a Promise; must be awaited.
 ) {
   try {
     const body = await req.json();                                     // Parses the JSON payload from the request body into a JS object.
     const { company } = await getDemoTenant();                         // Retrieves the demo Company to scope updates to one tenant.
 
-    const resolvedParams = await context.params;                       // Awaits params Promise to get the actual params object.
-    const loadId = resolvedParams.id;                                  // Extracts the load ID from the resolved params.
+    const resolvedParams = await params;                               // Awaits params Promise to get the actual params object.
+    const loadId = resolvedParams.loadId;                              // Extracts the loadId from the resolved params.
 
     if (!loadId) {                                                     // Guard: if there is still no load ID...
       return NextResponse.json(                                        // Respond with 400 Bad Request.
@@ -100,137 +100,114 @@ export async function PUT(                                             // Define
     }
 
     const updated = await db.load.update({                             // Performs the update on the Load table.
-      where: { id: loadId },                                           // Uses the resolved load ID as the unique key.
+      where: { id: loadId },                                           // Uses the resolved loadId as the unique key.
       data: {
         // RELATION FIELDS
         customerId:
-          body.customerId !== undefined                                // If customerId is present in the body...
-            ? body.customerId ?? null                                  // ...use it (allow null to clear).
-            : existing.customerId,                                     // Otherwise, retain the existing value.
+          body.customerId !== undefined
+            ? body.customerId ?? null
+            : existing.customerId,
         trailerId:
-          body.trailerId !== undefined                                 // Same pattern for trailerId.
+          body.trailerId !== undefined
             ? body.trailerId ?? null
             : existing.trailerId,
         truckId:
-          body.truckId !== undefined                                   // Same pattern for truckId.
+          body.truckId !== undefined
             ? body.truckId ?? null
             : existing.truckId,
 
         // CORE FINANCIALS
-        rate:
-          body.rate !== undefined                                      // If rate provided...
-            ? Number(body.rate)                                        // ...coerce to number and use it.
-            : existing.rate,                                           // Otherwise, keep old rate.
-        miles:
-          body.miles !== undefined                                     // Same pattern for miles.
-            ? Number(body.miles)
-            : existing.miles,
-        fuelCost:
-          body.fuelCost !== undefined                                  // Same for fuelCost.
-            ? Number(body.fuelCost)
-            : existing.fuelCost,
+        rate: body.rate !== undefined ? Number(body.rate) : existing.rate,
+        miles: body.miles !== undefined ? Number(body.miles) : existing.miles,
+        fuelCost: body.fuelCost !== undefined ? Number(body.fuelCost) : existing.fuelCost,
         lumper:
-          body.lumper !== undefined                                    // If lumper is in body...
-            ? body.lumper === null                                     // ...allow null to clear.
+          body.lumper !== undefined
+            ? body.lumper === null
               ? null
               : Number(body.lumper)
-            : existing.lumper,                                         // Otherwise keep existing.
+            : existing.lumper,
         tolls:
-          body.tolls !== undefined                                     // Same pattern for tolls.
+          body.tolls !== undefined
             ? body.tolls === null
               ? null
               : Number(body.tolls)
             : existing.tolls,
         otherCosts:
-          body.otherCosts !== undefined                                // Same for otherCosts.
+          body.otherCosts !== undefined
             ? body.otherCosts === null
               ? null
               : Number(body.otherCosts)
             : existing.otherCosts,
 
         // LOAD META
-        broker:
-          body.broker !== undefined                                    // If broker is present...
-            ? body.broker                                              // ...use value (string or null).
-            : existing.broker,
-        commodity:
-          body.commodity !== undefined                                 // If commodity is present...
-            ? body.commodity
-            : existing.commodity,
-        equipment:
-          body.equipment !== undefined                                 // If equipment type present...
-            ? body.equipment                                           // ...use it (must be valid EquipmentType).
-            : existing.equipment,
-        isTeam:
-          body.isTeam !== undefined                                    // If isTeam present...
-            ? Boolean(body.isTeam)                                     // ...cast to boolean and use.
-            : existing.isTeam,
+        broker: body.broker !== undefined ? body.broker : existing.broker,
+        commodity: body.commodity !== undefined ? body.commodity : existing.commodity,
+        equipment: body.equipment !== undefined ? body.equipment : existing.equipment,
+        isTeam: body.isTeam !== undefined ? Boolean(body.isTeam) : existing.isTeam,
         loadValue:
-          body.loadValue !== undefined                                 // If loadValue present...
-            ? body.loadValue === null                                  // ...allow null to clear.
+          body.loadValue !== undefined
+            ? body.loadValue === null
               ? null
               : Number(body.loadValue)
             : existing.loadValue,
 
         detentionHours:
-          body.detentionHours !== undefined                            // If detentionHours provided...
+          body.detentionHours !== undefined
             ? body.detentionHours === null
               ? null
               : Number(body.detentionHours)
             : existing.detentionHours,
         layoverDays:
-          body.layoverDays !== undefined                               // If layoverDays provided...
+          body.layoverDays !== undefined
             ? body.layoverDays === null
               ? null
               : Number(body.layoverDays)
             : existing.layoverDays,
         externalReference:
-          body.externalReference !== undefined                         // If externalReference provided...
+          body.externalReference !== undefined
             ? body.externalReference
             : existing.externalReference,
-        loadNumber:
-          body.loadNumber !== undefined                                // If loadNumber provided...
-            ? body.loadNumber
-            : existing.loadNumber,
-        tonuReason:
-          body.tonuReason !== undefined                                // If tonuReason provided...
-            ? body.tonuReason
-            : existing.tonuReason,
+        loadNumber: body.loadNumber !== undefined ? body.loadNumber : existing.loadNumber,
+        tonuReason: body.tonuReason !== undefined ? body.tonuReason : existing.tonuReason,
 
         // DATES & STATUS
         pickupDate:
-          body.pickupDate !== undefined && body.pickupDate !== null    // If pickupDate provided and not null...
-            ? new Date(body.pickupDate)                                // ...parse into a Date instance.
-            : body.pickupDate === null                                 // If explicitly null, clear field.
+          body.pickupDate !== undefined && body.pickupDate !== null
+            ? new Date(body.pickupDate)
+            : body.pickupDate === null
             ? null
-            : existing.pickupDate,                                     // Otherwise retain existing value.
+            : existing.pickupDate,
         deliveryDate:
-          body.deliveryDate !== undefined && body.deliveryDate !== null// Same logic for deliveryDate.
+          body.deliveryDate !== undefined && body.deliveryDate !== null
             ? new Date(body.deliveryDate)
             : body.deliveryDate === null
             ? null
             : existing.deliveryDate,
-        status:
-          body.status !== undefined                                    // If status provided...
-            ? body.status                                              // ...use it (must be valid LoadStatus).
-            : existing.status,
+        status: body.status !== undefined ? body.status : existing.status,
 
         invoicedAt:
-          body.invoicedAt !== undefined && body.invoicedAt !== null    // If invoicedAt provided and not null...
-            ? new Date(body.invoicedAt)                                // ...parse to Date.
-            : body.invoicedAt === null                                 // If explicitly null, clear.
+          body.invoicedAt !== undefined && body.invoicedAt !== null
+            ? new Date(body.invoicedAt)
+            : body.invoicedAt === null
             ? null
             : existing.invoicedAt,
-        isPaid:
-          body.isPaid !== undefined                                    // If isPaid present...
-            ? Boolean(body.isPaid)                                     // ...cast to boolean and use.
-            : existing.isPaid,
+        isPaid: body.isPaid !== undefined ? Boolean(body.isPaid) : existing.isPaid,
         paidAt:
-          body.paidAt !== undefined && body.paidAt !== null            // If paidAt present and not null...
-            ? new Date(body.paidAt)                                    // ...parse to Date.
-            : body.paidAt === null                                     // If explicitly null, clear.
+          body.paidAt !== undefined && body.paidAt !== null
+            ? new Date(body.paidAt)
+            : body.paidAt === null
             ? null
-            : existing.paidAt,                                         // Otherwise keep existing.
+            : existing.paidAt,
+      },
+      include: {                                                       // Return rich data after update, same as GET.
+        customer: true,
+        truck: true,
+        trailer: true,
+        loadDrivers: { include: { driver: true } },
+        stops: { orderBy: { sequence: "asc" } },
+        documents: true,
+        expenses: true,
+        invoiceLinks: { include: { invoice: true } },
       },
     });
 
@@ -245,18 +222,18 @@ export async function PUT(                                             // Define
 }
 
 /**
- * DELETE /api/loads/:id
+ * DELETE /api/loads/:loadId
  * Soft-deletes a load by setting isSoftDeleted + deletedAt (keeps history).
  */
-export async function DELETE(                                          // Defines the DELETE handler for /api/loads/[id].
+export async function DELETE(                                          // Defines the DELETE handler for /api/loads/[loadId].
   _req: NextRequest,                                                   // Incoming request object (unused in this handler).
-  context: { params: Promise<{ id?: string }> }                        // Route params passed as a Promise.
+  { params }: { params: Promise<{ loadId?: string }> }                 // Route params passed as a Promise.
 ) {
   try {
     const { company } = await getDemoTenant();                         // Retrieves the demo Company for scoping deletes.
 
-    const resolvedParams = await context.params;                       // Awaits params Promise to get the actual params.
-    const loadId = resolvedParams.id;                                  // Extracts the load ID from the resolved params.
+    const resolvedParams = await params;                               // Awaits params Promise to get the actual params.
+    const loadId = resolvedParams.loadId;                              // Extracts the loadId from the resolved params.
 
     if (!loadId) {                                                     // Guard: no ID provided.
       return NextResponse.json(                                        // Respond with 400 Bad Request.

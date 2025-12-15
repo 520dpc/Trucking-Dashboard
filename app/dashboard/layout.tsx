@@ -57,6 +57,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             >
               Customers
             </a>
+                        <a
+              href="/dashboard/documents"
+              className="rounded-md px-3 py-2 text-slate-700 hover:bg-slate-100"
+            >
+              Documents
+            </a>
           </nav>
 
           <div className="mt-4 text-xs text-slate-400">
